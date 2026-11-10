@@ -1,0 +1,926 @@
+"use client";
+
+import Link from "next/link";
+import { discardUploads, signChatAttachments } from "@/app/actions/files";
+import {
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { AlertDialog, DropdownMenu } from "radix-ui";
+import type { RealtimeChannel } from "@supabase/supabase-js";
+import { ArrowDown, Copy, Lock, MessagesSquare, MoreHorizontal, RotateCw, Trash2, UploadCloud, X } from "lucide-react";
+import { toast } from "sonner";
+import { createClient } from "@/lib/supabase/client";
+import { deleteMessage, sendMessage, type SendResult } from "@/app/actions/chat";
+import { Avatar, buttonClass } from "@/components/ui";
+import {
+  CHAT_PAGE_SIZE,
+  chatHref,
+  MESSAGE_COLUMNS,
+  newId,
+  toChatMessage,
+  type ChatAttachment,
+  type ChatChannel,
+  type ChatData,
+  type ChatMessage,
+  type ChatPerson,
+} from "@/lib/chat";
+import { formatDay, zonedDayKey } from "@/lib/dates";
+import { avatarUrl } from "@/lib/avatar";
+import { cn } from "@/lib/utils";
+import { Composer, type ComposerHandle } from "./composer";
+import { Attachments, MessageText, TypingDots } from "./message-parts";
+import type { MentionedPerson } from "./mention-profile";
+
+type Row = ChatMessage & { pending?: boolean; failed?: string };
+type Entry =
+  | { kind: "day"; key: string; label: string }
+  | { kind: "unread"; key: string }
+  | { kind: "message"; key: string; row: Row; first: boolean; last: boolean };
+
+const GROUP_GAP_MS = 5 * 60 * 1000;
+const noSubscribe = () => () => {};
+
+/** Unsent messages stay at the bottom; everything else is in server time order. */
+function sortRows(rows: Row[]): Row[] {
+  return [...rows].sort((a, b) => {
+    const pa = a.pending || a.failed ? 1 : 0;
+    const pb = b.pending || b.failed ? 1 : 0;
+    if (pa !== pb) return pa - pb;
+    return Date.parse(a.created_at) - Date.parse(b.created_at);
+  });
+}
+
+function upsert(rows: Row[], incoming: Row): Row[] {
+  const i = rows.findIndex((r) => r.id === incoming.id);
+  if (i === -1) return sortRows([...rows, incoming]);
+  const next = rows.slice();
+  next[i] = incoming;
+  return sortRows(next);
+}
+
+function previousDay(key: string) {
+  const [y, m, d] = key.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d - 1));
+  return date.toISOString().slice(0, 10);
+}
+
+function groups(a: Row, b: Row, tz: string) {
+  return (
+    a.author_id === b.author_id &&
+    !a.deleted_at &&
+    !b.deleted_at &&
+    zonedDayKey(a.created_at, tz) === zonedDayKey(b.created_at, tz) &&
+    Date.parse(b.created_at) - Date.parse(a.created_at) < GROUP_GAP_MS
+  );
+}
+
+function buildEntries(rows: Row[], tz: string, today: string, unreadFrom: string | null): Entry[] {
+  const yesterday = previousDay(today);
+  const entries: Entry[] = [];
+  let day = "";
+  rows.forEach((row, i) => {
+    const key = zonedDayKey(row.created_at, tz);
+    if (key !== day) {
+      day = key;
+      entries.push({ kind: "day", key: `day-${key}`, label: key === today ? "Today" : key === yesterday ? "Yesterday" : formatDay(key) });
+    }
+    if (row.id === unreadFrom) entries.push({ kind: "unread", key: "unread" });
+    const prev = rows[i - 1];
+    const next = rows[i + 1];
+    entries.push({
+      kind: "message",
+      key: row.id,
+      row,
+      first: !(prev && row.id !== unreadFrom && groups(prev, row, tz)),
+      last: !(next && next.id !== unreadFrom && groups(row, next, tz)),
+    });
+  });
+  return entries;
+}
+
+function joinNames(names: string[]) {
+  if (names.length <= 1) return names[0] ?? "";
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  if (names.length === 3) return `${names[0]}, ${names[1]} and ${names[2]}`;
+  return `${names[0]}, ${names[1]} and ${names.length - 2} others`;
+}
+
+const firstName = (name: string) => name.split(/\s+/)[0] || name;
+
+export function ChatRoom({
+  workspace,
+  channel,
+  viewer,
+  initial,
+  otherUnread: initialOtherUnread,
+  serverToday,
+}: {
+  workspace: { id: string; slug: string; name: string; timeZone: string };
+  channel: ChatChannel;
+  viewer: { id: string; name: string; isAgency: boolean; isAdmin: boolean };
+  initial: ChatData;
+  otherUnread: number;
+  serverToday: string;
+}) {
+  const [rows, setRows] = useState<Row[]>(initial.messages);
+  const [hasMore, setHasMore] = useState(initial.hasMore);
+  const [people, setPeople] = useState(initial.people);
+  const [signed, setSigned] = useState(initial.signed);
+  const [readers, setReaders] = useState(initial.readers);
+  const [typing, setTyping] = useState<Record<string, number>>({});
+  const [online, setOnline] = useState<string[]>([]);
+  const [newBelow, setNewBelow] = useState(0);
+  const [otherUnread, setOtherUnread] = useState(initialOtherUnread);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [confirming, setConfirming] = useState<Row | null>(null);
+  // Messages that were already there (first load, earlier pages) appear without animation.
+  const [quiet, setQuiet] = useState(() => new Set(initial.messages.map((m) => m.id)));
+
+  // First unread message from someone else, fixed for this visit.
+  const [unreadFrom] = useState<string | null>(() => {
+    const since = initial.lastReadAt ? Date.parse(initial.lastReadAt) : -Infinity;
+    return initial.messages.find((m) => m.author_id !== viewer.id && !m.deleted_at && Date.parse(m.created_at) > since)?.id ?? null;
+  });
+
+  // Times show in the reader's own time zone once the page is running in the
+  // browser; the server render uses the client's zone so the two match.
+  const tz = useSyncExternalStore(noSubscribe, () => Intl.DateTimeFormat().resolvedOptions().timeZone || workspace.timeZone, () => workspace.timeZone);
+  const today = useSyncExternalStore(noSubscribe, () => zonedDayKey(new Date().toISOString(), tz), () => serverToday);
+  const clock = useMemo(() => new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit" }), [tz]);
+
+  const list = useRef<HTMLDivElement>(null);
+  const composer = useRef<ComposerHandle>(null);
+  const nearBottom = useRef(true);
+  const restoreFromBottom = useRef<number | null>(null);
+  const didInit = useRef(false);
+  const rowsRef = useRef(rows);
+  const typingChannel = useRef<RealtimeChannel | null>(null);
+  const typingReady = useRef(false);
+  const lastTypingSent = useRef(0);
+  const readTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dragDepth = useRef(0);
+
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
+
+  const isTeam = channel === "team";
+  const entries = useMemo(() => buildEntries(rows, tz, today, unreadFrom), [rows, tz, today, unreadFrom]);
+  const participants = initial.participants.map((id) => people[id]).filter((p): p is ChatPerson => Boolean(p));
+  const others = participants.filter((p) => p.id !== viewer.id);
+  const onlineOthers = others.filter((p) => online.includes(p.id));
+  const typingNames = Object.keys(typing)
+    .filter((id) => id !== viewer.id)
+    .map((id) => firstName(people[id]?.name ?? "Someone"));
+
+  // ---------------------------------------------------------------------------
+  // Scrolling: stay pinned to the newest message unless the reader scrolled up.
+  // ---------------------------------------------------------------------------
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (!el) return;
+    if (!didInit.current) {
+      didInit.current = true;
+      const divider = el.querySelector<HTMLElement>("[data-unread-divider]");
+      if (divider && divider.offsetTop > el.clientHeight * 0.6) el.scrollTop = divider.offsetTop - 12;
+      else el.scrollTop = el.scrollHeight;
+      nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      return;
+    }
+    if (restoreFromBottom.current !== null) {
+      el.scrollTop = el.scrollHeight - restoreFromBottom.current;
+      restoreFromBottom.current = null;
+      return;
+    }
+    if (nearBottom.current) el.scrollTop = el.scrollHeight;
+  }, [rows, typingNames.length]);
+
+  function scrollToBottom(smooth = true) {
+    const el = list.current;
+    if (!el) return;
+    nearBottom.current = true;
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+    setNewBelow(0);
+  }
+
+  function keepPinned() {
+    const el = list.current;
+    if (el && nearBottom.current) el.scrollTop = el.scrollHeight;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Read markers: opening the chat (or receiving a message while it's on
+  // screen) marks it read, and a heartbeat tells the server someone is here
+  // so they aren't also sent a notification.
+  // ---------------------------------------------------------------------------
+  const markRead = useEffectEvent(() => {
+    if (document.visibilityState !== "visible") return;
+    if (readTimer.current) clearTimeout(readTimer.current);
+    readTimer.current = setTimeout(() => {
+      readTimer.current = null;
+      // Query builders are lazy: the request is only sent once it's awaited.
+      void (async () => {
+        const { error } = await createClient().rpc("mark_chat_read", { p_ws: workspace.id, p_channel: channel });
+        if (error) console.warn("[chat] couldn't mark as read", error.message);
+      })();
+    }, 400);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Loading people and file links that arrive with new messages
+  // ---------------------------------------------------------------------------
+  async function ensurePeople(ids: (string | null)[]) {
+    const missing = [...new Set(ids.filter((id): id is string => Boolean(id) && !people[id!]))];
+    if (!missing.length) return;
+    const { data } = await createClient().from("profiles").select("id, full_name, email, side, avatar_path, job_title").in("id", missing);
+    if (!data?.length) return;
+    setPeople((current) => {
+      const next = { ...current };
+      for (const p of data) {
+        next[p.id] = { id: p.id, name: p.full_name || p.email.split("@")[0], side: p.side, avatar: avatarUrl(p.avatar_path), jobTitle: p.job_title };
+      }
+      return next;
+    });
+  }
+
+  async function ensureSigned(files: ChatAttachment[]) {
+    const missing = [...new Set(files.map((f) => f.path).filter((p) => !signed[p]))];
+    if (!missing.length) return;
+    const found = await signChatAttachments(workspace.id, channel, missing).catch(() => ({}) as Record<string, string>);
+    if (Object.keys(found).length) setSigned((current) => ({ ...found, ...current }));
+  }
+
+  const receive = useEffectEvent((raw: Record<string, unknown>, event: "INSERT" | "UPDATE") => {
+    const rowChannel = raw.channel as ChatChannel;
+    const authorId = (raw.author_id as string | null) ?? null;
+    if (rowChannel !== channel) {
+      if (event === "INSERT" && authorId !== viewer.id) setOtherUnread((n) => n + 1);
+      return;
+    }
+    const message = toChatMessage(raw as Parameters<typeof toChatMessage>[0]);
+    const known = rowsRef.current.some((r) => r.id === message.id);
+    setRows((current) => upsert(current, message));
+    if (event === "INSERT" && !known && authorId !== viewer.id) {
+      if (!nearBottom.current) setNewBelow((n) => n + 1);
+      if (authorId) {
+        setTyping((current) => {
+          if (!(authorId in current)) return current;
+          const next = { ...current };
+          delete next[authorId];
+          return next;
+        });
+      }
+      markRead();
+    }
+    void ensurePeople([authorId]);
+    void ensureSigned(message.attachments);
+  });
+
+  const receiveRead = useEffectEvent((raw: Record<string, unknown>) => {
+    if (raw.channel !== channel || raw.user_id === viewer.id || typeof raw.user_id !== "string") return;
+    setReaders((current) => ({ ...current, [raw.user_id as string]: String(raw.last_read_at) }));
+  });
+
+  /** Fetches anything missed while the connection was down or the tab asleep. */
+  const catchUp = useEffectEvent(async () => {
+    const newest = [...rowsRef.current].reverse().find((r) => !r.pending && !r.failed);
+    let query = createClient()
+      .from("messages")
+      .select(MESSAGE_COLUMNS)
+      .eq("workspace_id", workspace.id)
+      .eq("channel", channel)
+      .order("created_at", { ascending: true })
+      .limit(100);
+    if (newest) query = query.gt("created_at", newest.created_at);
+    const { data } = await query;
+    for (const raw of data ?? []) receive({ ...raw, channel }, "INSERT");
+  });
+
+  // Database changes: new messages, deletions and read markers.
+  useEffect(() => {
+    const supabase = createClient();
+    let cancelled = false;
+    let ch: RealtimeChannel | null = null;
+    const filter = `workspace_id=eq.${workspace.id}`;
+    void (async () => {
+      // Join as the signed-in user, or row-level security rejects the filters.
+      await supabase.realtime.setAuth();
+      if (cancelled) return;
+      ch = supabase
+        .channel(`chat-db:${workspace.id}:${channel}`)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter }, (p) => receive(p.new, "INSERT"))
+        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "messages", filter }, (p) => receive(p.new, "UPDATE"))
+        .on("postgres_changes", { event: "*", schema: "public", table: "chat_reads", filter }, (p) => receiveRead(p.new as Record<string, unknown>))
+        .subscribe((status) => {
+          // Anything posted before this (re)connection is fetched directly.
+          if (status === "SUBSCRIBED") void catchUp();
+        });
+    })();
+    return () => {
+      cancelled = true;
+      if (ch) void supabase.removeChannel(ch);
+    };
+  }, [workspace.id, channel]);
+
+  // Typing indicators and who's here, on a private channel only people in
+  // this conversation can join.
+  useEffect(() => {
+    const supabase = createClient();
+    let cancelled = false;
+    let ch: RealtimeChannel | null = null;
+    void (async () => {
+      await supabase.realtime.setAuth();
+      if (cancelled) return;
+      ch = supabase.channel(`chat:${workspace.id}:${channel}`, {
+        config: { private: true, broadcast: { self: false }, presence: { key: viewer.id } },
+      });
+      ch.on("broadcast", { event: "typing" }, ({ payload }) => {
+        const id = typeof payload?.id === "string" ? payload.id : null;
+        if (!id || id === viewer.id) return;
+        setTyping((current) => {
+          const next = { ...current };
+          if (payload.stop) delete next[id];
+          else next[id] = Date.now() + 5000;
+          return next;
+        });
+      })
+        .on("presence", { event: "sync" }, () => {
+          if (ch) setOnline(Object.keys(ch.presenceState()));
+        })
+        .subscribe((status) => {
+          typingReady.current = status === "SUBSCRIBED";
+          if (status === "SUBSCRIBED" && ch) void ch.track({ at: new Date().toISOString() });
+        });
+      typingChannel.current = ch;
+    })();
+    return () => {
+      cancelled = true;
+      typingReady.current = false;
+      typingChannel.current = null;
+      if (ch) void supabase.removeChannel(ch);
+    };
+  }, [workspace.id, channel, viewer.id]);
+
+  // Typing indicators fade after a few seconds without news.
+  const typingCount = Object.keys(typing).length;
+  useEffect(() => {
+    if (!typingCount) return;
+    const timer = setInterval(() => {
+      const now = Date.now();
+      setTyping((current) => {
+        const live = Object.entries(current).filter(([, until]) => until > now);
+        return live.length === Object.keys(current).length ? current : Object.fromEntries(live);
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [typingCount]);
+
+  // Mark read now, when the tab comes back, and every minute while it's open.
+  useEffect(() => {
+    markRead();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        markRead();
+        void catchUp();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    const heartbeat = setInterval(() => markRead(), 60_000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      clearInterval(heartbeat);
+      if (readTimer.current) clearTimeout(readTimer.current);
+    };
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Actions
+  // ---------------------------------------------------------------------------
+  function announceTyping(stop = false) {
+    const ch = typingChannel.current;
+    if (!ch || !typingReady.current) return;
+    const now = Date.now();
+    if (!stop && now - lastTypingSent.current < 2500) return;
+    lastTypingSent.current = stop ? 0 : now;
+    void ch.send({ type: "broadcast", event: "typing", payload: { id: viewer.id, ...(stop ? { stop: true } : {}) } });
+  }
+
+  async function deliver(row: Row) {
+    let result: SendResult;
+    try {
+      result = await sendMessage({ id: row.id, workspaceId: workspace.id, channel, body: row.body, attachments: row.attachments, mentions: row.mentions });
+    } catch {
+      result = { ok: false, error: "Couldn't reach the server. Check your connection and try again." };
+    }
+    if (result.ok) {
+      const { message, signed: links } = result;
+      // Keep any local previews (no flicker); fill in links for everything else.
+      setSigned((current) => ({ ...links, ...current }));
+      setRows((current) => upsert(current, message));
+    } else {
+      const error = result.error;
+      setRows((current) => current.map((r) => (r.id === row.id ? { ...r, pending: false, failed: error } : r)));
+    }
+  }
+
+  function send(body: string, attachments: ChatAttachment[], previews: Record<string, string>, mentions: string[] = []) {
+    const row: Row = {
+      id: newId(),
+      author_id: viewer.id,
+      body,
+      attachments,
+      mentions,
+      created_at: new Date().toISOString(),
+      deleted_at: null,
+      pending: true,
+    };
+    if (Object.keys(previews).length) setSigned((current) => ({ ...current, ...previews }));
+    nearBottom.current = true;
+    setNewBelow(0);
+    setRows((current) => sortRows([...current, row]));
+    announceTyping(true);
+    void deliver(row);
+  }
+
+  function retry(row: Row) {
+    const again = { ...row, pending: true, failed: undefined };
+    setRows((current) => current.map((r) => (r.id === row.id ? again : r)));
+    void deliver(again);
+  }
+
+  function discard(row: Row) {
+    setRows((current) => current.filter((r) => r.id !== row.id));
+    if (row.attachments.length) void discardUploads({ scope: "chat", workspaceId: workspace.id, channel }, row.attachments.map((a) => a.path));
+  }
+
+  async function confirmDelete() {
+    const row = confirming;
+    setConfirming(null);
+    if (!row) return;
+    const before = rowsRef.current.find((r) => r.id === row.id);
+    setRows((current) => current.map((r) => (r.id === row.id ? { ...r, body: "", attachments: [], deleted_at: new Date().toISOString() } : r)));
+    const result = await deleteMessage(row.id);
+    if (!result.ok) {
+      if (before) setRows((current) => current.map((r) => (r.id === row.id ? before : r)));
+      toast.error(result.error ?? "That message couldn't be deleted.");
+    }
+  }
+
+  async function loadOlder() {
+    const el = list.current;
+    const oldest = rowsRef.current.find((r) => !r.pending && !r.failed);
+    if (!el || !oldest || loadingOlder) return;
+    setLoadingOlder(true);
+    const { data, error } = await createClient()
+      .from("messages")
+      .select(MESSAGE_COLUMNS)
+      .eq("workspace_id", workspace.id)
+      .eq("channel", channel)
+      .lt("created_at", oldest.created_at)
+      .order("created_at", { ascending: false })
+      .limit(CHAT_PAGE_SIZE + 1);
+    setLoadingOlder(false);
+    if (error) {
+      toast.error("Couldn't load earlier messages.");
+      return;
+    }
+    const older = (data ?? []).slice(0, CHAT_PAGE_SIZE).map(toChatMessage);
+    restoreFromBottom.current = el.scrollHeight - el.scrollTop;
+    setQuiet((current) => new Set([...current, ...older.map((m) => m.id)]));
+    setHasMore((data ?? []).length > CHAT_PAGE_SIZE);
+    setRows((current) => sortRows([...older.filter((o) => !current.some((r) => r.id === o.id)), ...current]));
+    void ensurePeople(older.map((m) => m.author_id));
+    void ensureSigned(older.flatMap((m) => m.attachments));
+  }
+
+  function onScroll() {
+    const el = list.current;
+    if (!el) return;
+    nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (nearBottom.current && newBelow) setNewBelow(0);
+    if (el.scrollTop < 40 && hasMore && !loadingOlder) void loadOlder();
+  }
+
+  // Drag files anywhere onto the chat to attach them.
+  const dragHandlers = {
+    onDragEnter: (e: React.DragEvent) => {
+      if (!e.dataTransfer.types.includes("Files")) return;
+      e.preventDefault();
+      dragDepth.current += 1;
+      setDragging(true);
+    },
+    onDragOver: (e: React.DragEvent) => {
+      if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+    },
+    onDragLeave: () => {
+      dragDepth.current = Math.max(0, dragDepth.current - 1);
+      if (!dragDepth.current) setDragging(false);
+    },
+    onDrop: (e: React.DragEvent) => {
+      if (!e.dataTransfer.files.length) return;
+      e.preventDefault();
+      dragDepth.current = 0;
+      setDragging(false);
+      composer.current?.addFiles(Array.from(e.dataTransfer.files));
+      composer.current?.focus();
+    },
+  };
+
+  // ---------------------------------------------------------------------------
+  // Copy
+  // ---------------------------------------------------------------------------
+  const clientNames = participants.filter((p) => p.side === "client").map((p) => firstName(p.name));
+  const title = isTeam ? "Team only" : viewer.isAgency ? workspace.name : "Your agency team";
+  const subtitle = typingNames.length
+    ? null
+    : onlineOthers.length
+      ? `${joinNames(onlineOthers.map((p) => firstName(p.name)))} ${onlineOthers.length === 1 ? "is" : "are"} here now`
+      : isTeam
+        ? `Private to the agency. ${workspace.name} can't see this.`
+        : viewer.isAgency
+          ? clientNames.length
+            ? `With ${joinNames(clientNames)} and your team`
+            : "No one from the client has joined yet"
+          : `Everyone in ${workspace.name} and the agency team can read this`;
+
+  const placeholder = isTeam ? "Message the team (the client can't see this)" : viewer.isAgency ? `Message ${workspace.name}` : "Message the team";
+
+  const last = rows.at(-1);
+  const seenBy =
+    last && last.author_id === viewer.id && !last.pending && !last.failed && !last.deleted_at
+      ? Object.entries(readers)
+          .filter(([id, at]) => id !== viewer.id && Date.parse(at) >= Date.parse(last.created_at))
+          .map(([id]) => people[id]?.name)
+          .filter((n): n is string => Boolean(n))
+          .map(firstName)
+      : [];
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">Chat</h1>
+        {viewer.isAgency ? (
+          <nav className="inline-flex shrink-0 rounded-xl bg-sunken p-1" aria-label="Conversations">
+            {(["client", "team"] as const).map((c) => {
+              const active = c === channel;
+              const count = active ? 0 : otherUnread;
+              return (
+                <Link
+                  key={c}
+                  href={chatHref(workspace.slug, c)}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "relative inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium transition",
+                    active ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink",
+                  )}
+                >
+                  {c === "team" ? <Lock className="size-3.5" aria-hidden /> : null}
+                  {c === "team" ? "Team only" : "Client chat"}
+                  {count ? (
+                    <span className="min-w-[18px] rounded-full bg-accent px-1 text-center text-[10px] leading-[18px] font-semibold text-white tabular-nums">
+                      {count > 9 ? "9+" : count}
+                    </span>
+                  ) : null}
+                </Link>
+              );
+            })}
+          </nav>
+        ) : null}
+      </div>
+
+      <section
+        aria-label={isTeam ? "Team-only chat" : "Chat"}
+        className={cn(
+          "relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-surface",
+          isTeam ? "border-violet-200" : "border-line",
+        )}
+        {...dragHandlers}
+      >
+        <header className={cn("flex shrink-0 items-center gap-3 border-b px-3 py-2.5 sm:px-4", isTeam ? "border-violet-100 bg-violet-50/70" : "border-line")}>
+          {isTeam ? (
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700">
+              <Lock className="size-4" aria-hidden />
+            </span>
+          ) : (
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent">
+              <MessagesSquare className="size-[18px]" aria-hidden />
+            </span>
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-ink">{title}</p>
+            <p className={cn("flex items-center gap-1.5 truncate text-xs", typingNames.length ? "text-accent" : "text-muted")} aria-live="polite">
+              {typingNames.length ? (
+                <>
+                  <TypingDots />
+                  {joinNames(typingNames)} {typingNames.length === 1 ? "is" : "are"} typing
+                </>
+              ) : (
+                subtitle
+              )}
+            </p>
+          </div>
+          <PeopleStack people={participants} online={online} viewerId={viewer.id} />
+        </header>
+
+        <div ref={list} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pt-2 pb-3 sm:px-5" role="log" aria-label="Messages">
+          {hasMore ? (
+            <div className="flex justify-center py-2">
+              <button type="button" onClick={() => void loadOlder()} disabled={loadingOlder} className={buttonClass("ghost", "sm")}>
+                {loadingOlder ? "Loading…" : "Load earlier messages"}
+              </button>
+            </div>
+          ) : null}
+
+          {rows.length ? (
+            entries.map((entry) => {
+              if (entry.kind === "day") {
+                return (
+                  <div key={entry.key} className="sticky top-0 z-10 flex justify-center py-2">
+                    <span className="rounded-full border border-line bg-surface/95 px-2.5 py-0.5 text-[11px] font-medium text-muted shadow-sm backdrop-blur">
+                      {entry.label}
+                    </span>
+                  </div>
+                );
+              }
+              if (entry.kind === "unread") {
+                return (
+                  <div key={entry.key} data-unread-divider className="my-3 flex items-center gap-2" role="separator" aria-label="New messages">
+                    <span className="h-px flex-1 bg-accent/40" />
+                    <span className="rounded-full bg-accent px-2 py-px text-[10px] font-semibold tracking-wide text-white uppercase">New</span>
+                  </div>
+                );
+              }
+              return (
+                <MessageRow
+                  key={entry.key}
+                  entry={entry}
+                  person={entry.row.author_id ? people[entry.row.author_id] : undefined}
+                  mentioned={entry.row.mentions.flatMap((id) => {
+                    const p = people[id];
+                    if (!p?.name) return [];
+                    // The full profile page is for agency admins only.
+                    return [{ ...p, me: id === viewer.id, here: online.includes(id), profileHref: viewer.isAdmin ? `/people/${id}` : null }];
+                  })}
+                  mine={entry.row.author_id === viewer.id}
+                  showSide={!isTeam}
+                  clock={clock}
+                  signed={signed}
+                  canDelete={entry.row.author_id === viewer.id || viewer.isAdmin}
+                  animate={!quiet.has(entry.row.id)}
+                  onMediaLoad={keepPinned}
+                  onDelete={() => setConfirming(entry.row)}
+                  onRetry={() => retry(entry.row)}
+                  onDiscard={() => discard(entry.row)}
+                />
+              );
+            })
+          ) : (
+            <EmptyChat isTeam={isTeam} isAgency={viewer.isAgency} workspaceName={workspace.name} />
+          )}
+
+          {seenBy.length ? (
+            <p className="mt-1 px-1 text-right text-[11px] text-faint">Seen by {joinNames(seenBy)}</p>
+          ) : null}
+        </div>
+
+        <AnimatePresence>
+          {newBelow ? (
+            <motion.button
+              type="button"
+              onClick={() => scrollToBottom()}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8 }}
+              className="absolute bottom-[88px] left-1/2 z-20 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white shadow-lg sm:bottom-[104px]"
+            >
+              <ArrowDown className="size-3.5" aria-hidden />
+              {newBelow === 1 ? "1 new message" : `${newBelow} new messages`}
+            </motion.button>
+          ) : null}
+        </AnimatePresence>
+
+        <Composer
+          ref={composer}
+          workspaceId={workspace.id}
+          channel={channel}
+          placeholder={placeholder}
+          people={participants.filter((p) => p.id !== viewer.id)}
+          onSend={send}
+          onTyping={() => announceTyping()}
+        />
+
+        {dragging ? (
+          <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-xl border-2 border-dashed border-accent bg-accent-soft/90">
+            <p className="flex items-center gap-2 text-sm font-semibold text-accent-ink">
+              <UploadCloud className="size-5" aria-hidden /> Drop files to attach them
+            </p>
+          </div>
+        ) : null}
+      </section>
+
+      <AlertDialog.Root open={Boolean(confirming)} onOpenChange={(open) => !open && setConfirming(null)}>
+        <AlertDialog.Portal>
+          <AlertDialog.Overlay className="fixed inset-0 z-50 bg-ink/40" />
+          <AlertDialog.Content className="animate-pop fixed top-1/2 left-1/2 z-50 w-[min(400px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-line bg-surface p-5 shadow-xl">
+            <AlertDialog.Title className="text-base font-semibold text-ink">Delete this message?</AlertDialog.Title>
+            <AlertDialog.Description className="mt-1 text-sm text-muted">
+              It will be removed for everyone{confirming?.attachments.length ? ", along with its files" : ""}. This can&apos;t be undone.
+            </AlertDialog.Description>
+            <div className="mt-5 flex justify-end gap-2">
+              <AlertDialog.Cancel className={buttonClass("secondary", "md")}>Cancel</AlertDialog.Cancel>
+              <AlertDialog.Action className={buttonClass("danger", "md")} onClick={() => void confirmDelete()}>
+                Delete
+              </AlertDialog.Action>
+            </div>
+          </AlertDialog.Content>
+        </AlertDialog.Portal>
+      </AlertDialog.Root>
+    </div>
+  );
+}
+
+function MessageRow({
+  entry,
+  person,
+  mentioned,
+  mine,
+  showSide,
+  clock,
+  signed,
+  canDelete,
+  animate,
+  onMediaLoad,
+  onDelete,
+  onRetry,
+  onDiscard,
+}: {
+  entry: Extract<Entry, { kind: "message" }>;
+  person?: ChatPerson;
+  /** People @mentioned in this message; "me" marks the viewer. Tapping one opens their profile card. */
+  mentioned: MentionedPerson[];
+  mine: boolean;
+  showSide: boolean;
+  clock: Intl.DateTimeFormat;
+  signed: Record<string, string>;
+  canDelete: boolean;
+  animate: boolean;
+  onMediaLoad: () => void;
+  onDelete: () => void;
+  onRetry: () => void;
+  onDiscard: () => void;
+}) {
+  const { row, first, last } = entry;
+  const name = person?.name ?? "Former member";
+  const time = clock.format(new Date(row.created_at));
+  const deleted = Boolean(row.deleted_at);
+  const hasBody = row.body.length > 0;
+
+  const menu =
+    !deleted && !row.pending && !row.failed && (hasBody || canDelete) ? (
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger
+          className="inline-flex size-7 shrink-0 items-center justify-center self-center rounded-full text-faint opacity-0 transition group-hover:opacity-100 hover:bg-sunken hover:text-ink focus-visible:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-60"
+          aria-label="Message options"
+        >
+          <MoreHorizontal className="size-4" aria-hidden />
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content
+            align={mine ? "end" : "start"}
+            sideOffset={4}
+            className="animate-pop z-50 min-w-40 rounded-xl border border-line bg-surface p-1.5 shadow-xl shadow-black/10"
+          >
+            {hasBody ? (
+              <DropdownMenu.Item
+                className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-ink-soft outline-none data-[highlighted]:bg-sunken data-[highlighted]:text-ink"
+                onSelect={() => {
+                  void navigator.clipboard?.writeText(row.body).then(() => toast.success("Copied"));
+                }}
+              >
+                <Copy className="size-4" aria-hidden /> Copy text
+              </DropdownMenu.Item>
+            ) : null}
+            {canDelete ? (
+              <DropdownMenu.Item
+                className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-danger outline-none data-[highlighted]:bg-danger-soft"
+                onSelect={onDelete}
+              >
+                <Trash2 className="size-4" aria-hidden /> Delete
+              </DropdownMenu.Item>
+            ) : null}
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+    ) : null;
+
+  const bubble = deleted ? (
+    <div className="rounded-2xl border border-dashed border-line px-3 py-1.5 text-[13px] text-faint italic">Message deleted</div>
+  ) : (
+    <div className={cn("flex min-w-0 flex-col gap-1.5", mine ? "items-end" : "items-start")}>
+      {hasBody ? (
+        <div
+          title={time}
+          className={cn(
+            "max-w-full rounded-2xl px-3.5 py-2",
+            mine ? "bg-accent text-white" : "bg-sunken text-ink",
+            !mine && mentioned.some((m) => m.me) && "ring-2 ring-accent/35",
+            mine ? [!first && "rounded-tr-md", !last && "rounded-br-md"] : [!first && "rounded-tl-md", !last && "rounded-bl-md"],
+            row.pending && "opacity-70",
+          )}
+        >
+          <MessageText text={row.body} mine={mine} mentions={mentioned} />
+        </div>
+      ) : null}
+      <Attachments files={row.attachments} signed={signed} mine={mine} onMediaLoad={onMediaLoad} />
+    </div>
+  );
+
+  return (
+    <motion.div
+      initial={animate ? { opacity: 0, y: 8 } : false}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.18 }}
+      className={cn("group flex gap-2", mine ? "justify-end" : "justify-start", first ? "mt-3" : "mt-0.5")}
+    >
+      {!mine ? <div className="w-8 shrink-0 pt-5">{first ? <Avatar name={name} src={person?.avatar} /> : null}</div> : null}
+      <div className={cn("flex max-w-[85%] min-w-0 flex-col sm:max-w-[70%]", mine ? "items-end" : "items-start")}>
+        {first && !mine ? (
+          <div className="mb-1 flex items-center gap-1.5 px-1 text-xs">
+            <span className="font-semibold text-ink">{name}</span>
+            {showSide && person?.side === "agency" ? (
+              <span className="rounded-full bg-accent-soft px-1.5 py-px text-[10px] font-semibold text-accent-ink">Agency</span>
+            ) : null}
+            <span className="text-faint">{time}</span>
+          </div>
+        ) : null}
+        <div className="flex max-w-full items-center gap-1">
+          {mine ? menu : null}
+          {bubble}
+          {!mine ? menu : null}
+        </div>
+        {row.failed ? (
+          <div className="mt-1 flex flex-wrap items-center justify-end gap-x-2 px-1 text-[11px]" role="alert">
+            <span className="text-danger">Not sent. {row.failed}</span>
+            <button type="button" onClick={onRetry} className="inline-flex items-center gap-1 font-semibold text-accent-ink hover:underline">
+              <RotateCw className="size-3" aria-hidden /> Retry
+            </button>
+            <button type="button" onClick={onDiscard} className="inline-flex items-center gap-1 text-muted hover:text-ink">
+              <X className="size-3" aria-hidden /> Remove
+            </button>
+          </div>
+        ) : mine && (last || row.pending) ? (
+          <p className="mt-1 px-1 text-[11px] text-faint">{row.pending ? "Sending…" : time}</p>
+        ) : null}
+      </div>
+    </motion.div>
+  );
+}
+
+function PeopleStack({ people, online, viewerId }: { people: ChatPerson[]; online: string[]; viewerId: string }) {
+  if (!people.length) return null;
+  const sorted = [...people].sort((a, b) => Number(online.includes(b.id)) - Number(online.includes(a.id)));
+  const shown = sorted.slice(0, 3);
+  const extra = people.length - shown.length;
+  const label = people
+    .map((p) => `${p.name}${p.jobTitle ? ` (${p.jobTitle})` : ""}${p.id === viewerId ? ", you" : ""}${online.includes(p.id) ? ", here now" : ""}`)
+    .join("; ");
+  return (
+    <div className="flex shrink-0 items-center" title={label} aria-label={`In this chat: ${label}`} role="img">
+      <div className="flex -space-x-1">
+        {shown.map((p) => (
+          <span key={p.id} className="relative rounded-full ring-2 ring-surface">
+            <Avatar name={p.name} src={p.avatar} size="sm" />
+            {online.includes(p.id) ? <span className="absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full bg-emerald-500 ring-2 ring-surface" /> : null}
+          </span>
+        ))}
+      </div>
+      {extra > 0 ? <span className="ml-1.5 text-xs font-medium text-muted">+{extra}</span> : null}
+    </div>
+  );
+}
+
+function EmptyChat({ isTeam, isAgency, workspaceName }: { isTeam: boolean; isAgency: boolean; workspaceName: string }) {
+  return (
+    <div className="flex h-full min-h-60 flex-col items-center justify-center px-6 py-10 text-center">
+      <span className={cn("flex size-14 items-center justify-center rounded-2xl", isTeam ? "bg-violet-100 text-violet-700" : "bg-accent-soft text-accent")}>
+        {isTeam ? <Lock className="size-6" aria-hidden /> : <MessagesSquare className="size-6" aria-hidden />}
+      </span>
+      <p className="mt-4 text-[15px] font-semibold text-ink">{isTeam ? "Talk about this client privately" : "Start the conversation"}</p>
+      <p className="mt-1 max-w-sm text-sm text-muted">
+        {isTeam
+          ? `Only your agency team sees these messages. ${workspaceName} never does.`
+          : isAgency
+            ? `Messages here go to everyone at ${workspaceName} who uses the portal, and to your team.`
+            : "Ask a question, share an idea or send photos. Everyone on the agency team working with you will see it."}
+      </p>
+    </div>
+  );
+}
