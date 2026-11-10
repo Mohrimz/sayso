@@ -40,7 +40,7 @@ export async function ChatScreen({ slug, channel }: { slug: string; channel: Cha
   ]);
 
   return (
-    <ChatFrame>
+    <ChatFrame fill>
       <ChatRoom
         key={`${workspace.id}:${channel}`}
         workspace={{ id: workspace.id, slug: workspace.slug, name: workspace.name, timeZone: workspace.time_zone }}

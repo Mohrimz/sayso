@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getAgencyAssignees, getPeople, getWorkspaceMembers } from "@/lib/queries";
 import { parseMedia, signMedia } from "@/lib/media";
 import { CONTENT_TYPES, captionFor, platformLabel } from "@/lib/content";
-import { defaultApprovalDeadline, formatDateTime, isoToZonedInput } from "@/lib/dates";
+import { defaultApprovalDeadline, formatDateTime, isoToZonedInput, zoneLabel } from "@/lib/dates";
 import { asArray, asObject, type ApprovalRuleEntry, type ContentItem } from "@/lib/types";
 import { Badge, Card } from "@/components/ui";
 import { PostResultsCard } from "@/components/post-results-card";
@@ -645,6 +645,7 @@ function AgencyWorkflow({
               <label className="flex flex-wrap items-center gap-2 text-[13px] text-ink-soft">
                 Client should reply by
                 <input name="deadline" type="datetime-local" defaultValue={isoToZonedInput(defaultApprovalDeadline(item.planned_at), tz)} className="field w-auto py-1.5" />
+                <span className="text-muted">{zoneLabel(tz)} time. The client sees it in PT and LK.</span>
               </label>
               <div className="flex flex-wrap gap-2">
                 <SubmitButton name="decision" value="passed" variant="primary" pendingLabel="Sending…">

@@ -60,7 +60,7 @@ function contextNote(timeZone: string): string {
     hour: "2-digit",
     minute: "2-digit",
   }).format(now);
-  return `<context>Current time for the user: ${local} (${timeZone}).</context>`;
+  return `<context>Current time for the user: ${local} (${timeZone}). Times in tool results are given in US Pacific time (PT, the clients' audience) and Sri Lanka time (LK, the agency); give both when you mention a time.</context>`;
 }
 
 /**

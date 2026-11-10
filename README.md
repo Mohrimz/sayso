@@ -51,6 +51,14 @@ The dashboard shows what needs attention today, what's waiting with clients, and
   <img src="docs/screenshots/dashboard.png" alt="The agency dashboard" width="900">
 </p>
 
+### Chat with the client, in the same place
+
+Each client has a chat with the agency team, plus a team-only chat the client never sees. Reply to a specific message, react with an emoji, edit what you sent, and open or download photos.
+
+<p align="center">
+  <img src="docs/screenshots/chat.png" alt="A client chat with replies, reactions and an edited message" width="900">
+</p>
+
 ### The month in one calendar
 
 Every post for the month, colour-coded by stage, with the client's key dates marked.
@@ -97,11 +105,13 @@ The Team page lists agency staff and clients, with when each person last used th
 | **Approval workflow** | Planned → Draft → Internal review → Client approval → Approved → Scheduled → Published. Every upload is kept as a version, and each approval records which version it was for. |
 | **Roles** | Agency admins, team members, client approvers and client viewers. Only an admin sends posts to the client or publishes them; team members send work to the admin for review. |
 | **Publishing** | One click posts an approved post to Instagram and Facebook, and its results (reach, likes, comments) come back into the portal. |
-| **Chat** | Real-time chat between each client and the agency team, with @mentions, replies, emoji reactions, and photo previews with download. |
+| **Chat** | Real-time chat between each client and the agency team: @mentions, replies, emoji reactions, editing your own messages, and photo previews with download. |
 | **Library** | Product photos, videos and files in one place. Download one, a few, or everything as a ZIP. |
 | **Offers** | Clients tell the agency about a sale or launch in their own words, so posts can be planned around it. |
 | **Tasks** | To-dos for the team and for the client, with a submit-and-review step for team work. |
 | **Notifications** | In the portal and by email, and each person chooses which ones are emailed. |
+| **Two time zones** | Every time is shown twice, in the audience's time zone and the agency's, for example "19:30 PT · 09:00 LK". |
+| **Arranging posts** | Reorder a post's photos by dragging, and write the caption right under the preview. |
 | **Assistant** | A built-in assistant for agency staff that answers questions like "what needs my attention today?" |
 | **Privacy** | Each client sees only their own workspace. Clients never see internal notes, drafts or other clients. This is enforced in the database, not just hidden in the interface. |
 

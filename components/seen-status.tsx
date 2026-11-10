@@ -1,8 +1,7 @@
-import { formatDateTime, timeAgo } from "@/lib/dates";
+import { AGENCY_TIME_ZONE, formatDateTime, timeAgo } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 
-// The agency works from Sri Lanka, so exact times are shown in that time zone.
-export const AGENCY_TIME_ZONE = "Asia/Colombo";
+export { AGENCY_TIME_ZONE };
 const ACTIVE_FOR_MS = 5 * 60 * 1000;
 
 function activeNow(iso: string) {
@@ -14,7 +13,7 @@ export function SeenStatus({ iso, className }: { iso: string | null; className?:
   if (!iso) {
     return <span className={cn("inline-flex items-center gap-1.5 text-xs text-faint", className)}>Hasn&apos;t signed in yet</span>;
   }
-  const exact = `${formatDateTime(iso, AGENCY_TIME_ZONE)} (Sri Lanka time)`;
+  const exact = formatDateTime(iso);
   if (activeNow(iso)) {
     return (
       <span className={cn("inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700", className)} title={`Last seen ${exact}`}>

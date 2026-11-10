@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import type { Database } from "@/lib/database.types";
 import { CONTENT_TYPES, deliverables, deliverableSummary, platformLabel, statusView } from "@/lib/content";
-import { currentMonth, formatDate, todayKey, zonedDayKey, zonedInputToIso } from "@/lib/dates";
+import { currentMonth, formatDate, formatDateTime as formatBothZones, todayKey, zonedDayKey, zonedInputToIso } from "@/lib/dates";
 import { asArray, asObject, type ContentStatus, type Faq, type KeyDate, type Quotas, type SocialAccount } from "@/lib/types";
 import { offerPreview, recentOfferSince } from "@/lib/offers";
 
@@ -50,17 +50,9 @@ const snippet = (text: string | null | undefined, max = 240) => {
 };
 const hoursAgoIso = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
 
-/** "Sat 14 Nov, 08:30 GMT": always says which time zone a time is in, so answers never mix them up. */
+/** "Fri 13 Nov, 19:30 PT · Sat 14 Nov, 09:00 LK": every time in US Pacific and Sri Lanka time, labelled, so answers never mix them up. */
 function formatDateTime(iso: string, tz: string): string {
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: tz,
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZoneName: "short",
-  }).format(new Date(iso));
+  return formatBothZones(iso, tz);
 }
 
 /**

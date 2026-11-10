@@ -22,6 +22,8 @@ export type ChatMessage = {
   /** Emoji reactions: each emoji with the ids of the people who chose it. */
   reactions: Record<string, string[]>;
   created_at: string;
+  /** When the author last changed the text, if they did. */
+  edited_at: string | null;
   deleted_at: string | null;
 };
 
@@ -49,7 +51,7 @@ export const MAX_FILE_BYTES = 50 * 1024 * 1024;
 /** Signed file links stay valid for a working day, so long-open chats keep their images. */
 export const SIGNED_URL_TTL = 60 * 60 * 12;
 
-export const MESSAGE_COLUMNS = "id, author_id, body, attachments, mentions, reply_to, reactions, created_at, deleted_at";
+export const MESSAGE_COLUMNS = "id, author_id, body, attachments, mentions, reply_to, reactions, created_at, edited_at, deleted_at";
 export const MAX_MENTIONS = 20;
 
 export function isChannel(value: unknown): value is ChatChannel {
@@ -105,6 +107,7 @@ export function toChatMessage(row: {
   reply_to?: unknown;
   reactions?: unknown;
   created_at: string;
+  edited_at?: string | null;
   deleted_at: string | null;
 }): ChatMessage {
   return {
@@ -116,6 +119,7 @@ export function toChatMessage(row: {
     reply_to: typeof row.reply_to === "string" ? row.reply_to : null,
     reactions: parseReactions(row.reactions),
     created_at: row.created_at,
+    edited_at: row.edited_at ?? null,
     deleted_at: row.deleted_at,
   };
 }

@@ -102,16 +102,49 @@ export function monthGrid(month: string): { key: string; day: number; inMonth: b
   });
 }
 
-export function formatDateTime(iso: string | null | undefined, tz: string): string {
+/**
+ * Every clock time is shown twice: in US Pacific time (where the clients'
+ * audiences are) and in Sri Lanka time (where the agency works). A client in
+ * any other zone gets theirs as well.
+ */
+export const US_TIME_ZONE = "America/Los_Angeles";
+export const AGENCY_TIME_ZONE = "Asia/Colombo";
+const ZONE_LABELS: Record<string, string> = { [US_TIME_ZONE]: "PT", [AGENCY_TIME_ZONE]: "LK" };
+
+/** "PT", "LK", or the zone's own short name ("GMT", "CET") for anywhere else. */
+export function zoneLabel(tz: string, at: Date = new Date()): string {
+  if (ZONE_LABELS[tz]) return ZONE_LABELS[tz];
+  const name = new Intl.DateTimeFormat("en-GB", { timeZone: tz, timeZoneName: "short" }).formatToParts(at).find((p) => p.type === "timeZoneName");
+  return name?.value ?? tz;
+}
+
+/** The zones to show a time in: USA first, then Sri Lanka, then the client's own if it's neither. */
+export function displayZones(tz?: string): string[] {
+  return [...new Set([US_TIME_ZONE, AGENCY_TIME_ZONE, ...(tz ? [tz] : [])])];
+}
+
+/** "Mon 9 Nov, 19:30 PT · Tue 10 Nov, 09:00 LK" (the date isn't repeated when it's the same day in both). */
+export function formatDateTime(iso: string | null | undefined, tz?: string): string {
   if (!iso) return "No date set";
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: tz,
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(iso));
+  const at = new Date(iso);
+  let firstDay = "";
+  return displayZones(tz)
+    .map((zone, i) => {
+      const day = new Intl.DateTimeFormat("en-GB", { timeZone: zone, weekday: "short", day: "numeric", month: "short" }).format(at);
+      const time = new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", minute: "2-digit" }).format(at);
+      if (i === 0) firstDay = day;
+      return `${i === 0 || day !== firstDay ? `${day}, ` : ""}${time} ${zoneLabel(zone, at)}`;
+    })
+    .join(" · ");
+}
+
+/** Just the clock time in each zone: "19:30 PT · 09:00 LK". */
+export function formatTime(iso: string | null | undefined, tz?: string): string {
+  if (!iso) return "";
+  const at = new Date(iso);
+  return displayZones(tz)
+    .map((zone) => `${new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", minute: "2-digit" }).format(at)} ${zoneLabel(zone, at)}`)
+    .join(" · ");
 }
 
 export function formatDate(iso: string | null | undefined, tz = "UTC"): string {

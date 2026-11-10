@@ -14,10 +14,10 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { AlertDialog, DropdownMenu, Popover } from "radix-ui";
 import type { RealtimeChannel } from "@supabase/supabase-js";
-import { ArrowDown, Copy, CornerUpLeft, Lock, SmilePlus, MessagesSquare, MoreHorizontal, RotateCw, Trash2, UploadCloud, X } from "lucide-react";
+import { ArrowDown, Copy, CornerUpLeft, Lock, Pencil, SmilePlus, MessagesSquare, MoreHorizontal, RotateCw, Trash2, UploadCloud, X } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
-import { deleteMessage, sendMessage, toggleReaction, type SendResult } from "@/app/actions/chat";
+import { deleteMessage, editMessage, sendMessage, toggleReaction, type SendResult } from "@/app/actions/chat";
 import { Avatar, buttonClass } from "@/components/ui";
 import {
   CHAT_PAGE_SIZE,
@@ -32,7 +32,7 @@ import {
   type ChatMessage,
   type ChatPerson,
 } from "@/lib/chat";
-import { formatDay, zonedDayKey } from "@/lib/dates";
+import { formatDay, formatTime, zonedDayKey } from "@/lib/dates";
 import { avatarUrl } from "@/lib/avatar";
 import { cn } from "@/lib/utils";
 import { Composer, type ComposerHandle } from "./composer";
@@ -172,7 +172,8 @@ export function ChatRoom({
   // browser; the server render uses the client's zone so the two match.
   const tz = useSyncExternalStore(noSubscribe, () => Intl.DateTimeFormat().resolvedOptions().timeZone || workspace.timeZone, () => workspace.timeZone);
   const today = useSyncExternalStore(noSubscribe, () => zonedDayKey(new Date().toISOString(), tz), () => serverToday);
-  const clock = useMemo(() => new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit" }), [tz]);
+  // Message times in US Pacific and Sri Lanka time: "19:30 PT · 09:00 LK".
+  const clock = useMemo(() => ({ format: (date: Date) => formatTime(date.toISOString(), tz) }), [tz]);
 
   const list = useRef<HTMLDivElement>(null);
   const composer = useRef<ComposerHandle>(null);
@@ -481,6 +482,7 @@ export function ChatRoom({
       mentions,
       reply_to: replyingTo?.id ?? null,
       reactions: {},
+      edited_at: null,
       created_at: new Date().toISOString(),
       deleted_at: null,
       pending: true,
@@ -552,6 +554,24 @@ export function ChatRoom({
       setRows((current) => current.map((r) => (r.id === row.id ? flip(r) : r)));
       toast.error(result.error ?? "That reaction couldn't be saved.");
     }
+  }
+
+  /** Saves new text for one of the viewer's own messages. Shows it straight away; puts the old text back if saving fails. */
+  async function saveEdit(row: Row, body: string): Promise<boolean> {
+    const text = body.trim();
+    if (text === row.body) return true;
+    if (!text && !row.attachments.length) {
+      toast.error("Write a message, or delete it instead.");
+      return false;
+    }
+    setRows((current) => current.map((r) => (r.id === row.id ? { ...r, body: text, edited_at: new Date().toISOString() } : r)));
+    const result = await editMessage(row.id, text).catch(() => ({ ok: false, error: "Couldn't reach the server." }));
+    if (!result.ok) {
+      setRows((current) => current.map((r) => (r.id === row.id ? { ...r, body: row.body, edited_at: row.edited_at } : r)));
+      toast.error(result.error ?? "That message couldn't be changed.");
+      return false;
+    }
+    return true;
   }
 
   function startReply(row: Row) {
@@ -769,6 +789,7 @@ export function ChatRoom({
                   onJump={jumpTo}
                   onMediaLoad={keepPinned}
                   onDelete={() => setConfirming(entry.row)}
+                  onEdit={(text) => saveEdit(entry.row, text)}
                   onRetry={() => retry(entry.row)}
                   onDiscard={() => discard(entry.row)}
                 />
@@ -873,6 +894,7 @@ function MessageRow({
   onReact,
   onMediaLoad,
   onDelete,
+  onEdit,
   onRetry,
   onDiscard,
 }: {
@@ -891,12 +913,14 @@ function MessageRow({
   mentioned: MentionedPerson[];
   mine: boolean;
   showSide: boolean;
-  clock: Intl.DateTimeFormat;
+  clock: { format: (date: Date) => string };
   signed: Record<string, string>;
   canDelete: boolean;
   animate: boolean;
   onMediaLoad: () => void;
   onDelete: () => void;
+  /** Saves new text for the viewer's own message; resolves to false if it couldn't be saved. */
+  onEdit: (text: string) => Promise<boolean>;
   onRetry: () => void;
   onDiscard: () => void;
 }) {
@@ -906,6 +930,16 @@ function MessageRow({
   const deleted = Boolean(row.deleted_at);
   const hasBody = row.body.length > 0;
   const [picking, setPicking] = useState(false);
+  // The text being edited (null when not editing).
+  const [draft, setDraft] = useState<string | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const finishEdit = async () => {
+    if (draft === null || savingEdit) return;
+    setSavingEdit(true);
+    const ok = await onEdit(draft);
+    setSavingEdit(false);
+    if (ok) setDraft(null);
+  };
 
   const menu =
     !deleted && !row.pending && !row.failed ? (
@@ -965,6 +999,14 @@ function MessageRow({
             >
               <CornerUpLeft className="size-4" aria-hidden /> Reply
             </DropdownMenu.Item>
+            {mine ? (
+              <DropdownMenu.Item
+                className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-ink-soft outline-none data-[highlighted]:bg-sunken data-[highlighted]:text-ink"
+                onSelect={() => setDraft(row.body)}
+              >
+                <Pencil className="size-4" aria-hidden /> Edit
+              </DropdownMenu.Item>
+            ) : null}
             {hasBody ? (
               <DropdownMenu.Item
                 className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-ink-soft outline-none data-[highlighted]:bg-sunken data-[highlighted]:text-ink"
@@ -1036,9 +1078,37 @@ function MessageRow({
   ) : (
     <div className={cn("flex min-w-0 flex-col gap-1.5", mine ? "items-end" : "items-start")}>
       {quoteCard}
-      {hasBody ? (
+      {draft !== null ? (
+        <div className="w-[min(100%,420px)] min-w-[240px] rounded-2xl border border-accent/50 bg-surface p-2">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setDraft(null);
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void finishEdit();
+              }
+            }}
+            rows={Math.min(8, Math.max(2, draft.split("\n").length))}
+            maxLength={4000}
+            autoFocus
+            aria-label="Edit your message"
+            className="block w-full resize-none bg-transparent px-1.5 py-1 text-[15px] leading-snug text-ink outline-none sm:text-sm"
+          />
+          <div className="mt-1 flex items-center justify-end gap-1.5">
+            <span className="mr-auto pl-1.5 text-[11px] text-faint">Enter to save · Esc to cancel</span>
+            <button type="button" onClick={() => setDraft(null)} disabled={savingEdit} className={buttonClass("ghost", "sm")}>
+              Cancel
+            </button>
+            <button type="button" onClick={() => void finishEdit()} disabled={savingEdit} className={buttonClass("primary", "sm")}>
+              {savingEdit ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </div>
+      ) : hasBody ? (
         <div
-          title={time}
+          title={row.edited_at ? `${time} (edited)` : time}
           className={cn(
             "max-w-full rounded-2xl px-3.5 py-2",
             mine ? "bg-accent text-white" : "bg-sunken text-ink",
@@ -1048,6 +1118,7 @@ function MessageRow({
           )}
         >
           <MessageText text={row.body} mine={mine} mentions={mentioned} />
+          {row.edited_at ? <span className={cn("mt-0.5 block text-right text-[10px]", mine ? "text-white/70" : "text-faint")}>edited</span> : null}
         </div>
       ) : null}
       <Attachments files={row.attachments} signed={signed} mine={mine} onMediaLoad={onMediaLoad} />

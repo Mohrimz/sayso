@@ -135,7 +135,7 @@ export function insightFor(key: string, audience: Audience): Insight {
           ["Admins", "see every client and manage settings and billing."],
           ["Team members", "only see the clients they're assigned to. Use Assign clients on their row."],
           ["Clients", "everyone on the client side, with their client, their role and when they were last active. “Setup not finished” means they signed in but haven't completed their first sign-in setup."],
-          ["Last seen", "hover over the time to see exactly when, in Sri Lanka time."],
+          ["Last seen", "hover over the time to see exactly when, in US Pacific (PT) and Sri Lanka (LK) time."],
         ],
       };
     case "new-client":

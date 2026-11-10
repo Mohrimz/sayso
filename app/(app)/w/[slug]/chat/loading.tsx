@@ -6,7 +6,7 @@ import { ChatFrame } from "@/components/chat/chat-frame";
 export default function Loading() {
   return (
     <ViewTransition exit="vt-out" default="none">
-      <ChatFrame busy>
+      <ChatFrame busy fill>
         <Skeleton className="mb-3 h-8 w-28" />
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-line bg-surface" aria-label="Loading chat">
           <div className="flex items-center gap-3 border-b border-line px-4 py-2.5">

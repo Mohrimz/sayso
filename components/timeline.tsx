@@ -4,7 +4,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { TypeIcon } from "@/components/type-icon";
 import { toneDot } from "@/components/ui";
 import { statusView } from "@/lib/content";
-import { formatDay, monthGrid, todayKey, zonedDayKey } from "@/lib/dates";
+import { formatDay, formatTime, monthGrid, todayKey, zonedDayKey } from "@/lib/dates";
 import type { ContentItem, KeyDate } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -20,9 +20,9 @@ function groupByDay(items: Item[], tz: string) {
   return map;
 }
 
+/** "19:30 PT · 09:00 LK" */
 function timeOf(iso: string | null, tz: string) {
-  if (!iso) return "";
-  return new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+  return formatTime(iso, tz);
 }
 
 /**
@@ -205,7 +205,7 @@ function AgendaList({
                   href={`${basePath}/content/${item.id}`}
                   className="-mx-2 flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-sunken"
                 >
-                  <span className="w-11 shrink-0 text-xs tabular-nums text-muted">{timeOf(item.planned_at, tz)}</span>
+                  <span className="shrink-0 text-xs tabular-nums text-muted">{timeOf(item.planned_at, tz)}</span>
                   <TypeIcon type={item.type} className="text-muted" />
                   <span className="line-clamp-2 min-w-0 flex-1 text-sm leading-snug text-ink">{item.title}</span>
                   <StatusBadge item={item} side={side} />

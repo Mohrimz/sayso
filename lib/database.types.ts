@@ -333,14 +333,14 @@ isOneToOne: false
                   ]
                 },"messages": {
                   Row: {
-                    "attachments": NonNullable<Json>,"author_id": string | null,"body": string,"channel": Database["public"]['Enums']["chat_channel"],"created_at": string,"deleted_at": string | null,"id": string,"mentions": (string)[],"reactions": NonNullable<Json>,"reply_to": string | null,"workspace_id": string
+                    "attachments": NonNullable<Json>,"author_id": string | null,"body": string,"channel": Database["public"]['Enums']["chat_channel"],"created_at": string,"deleted_at": string | null,"edited_at": string | null,"id": string,"mentions": (string)[],"reactions": NonNullable<Json>,"reply_to": string | null,"workspace_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel"?: Database["public"]['Enums']["chat_channel"],"created_at"?: string,"deleted_at"?: string | null,"id"?: string,"mentions"?: (string)[],"reactions"?: NonNullable<Json>,"reply_to"?: string | null,"workspace_id": string
+                    "attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel"?: Database["public"]['Enums']["chat_channel"],"created_at"?: string,"deleted_at"?: string | null,"edited_at"?: string | null,"id"?: string,"mentions"?: (string)[],"reactions"?: NonNullable<Json>,"reply_to"?: string | null,"workspace_id": string
                   }
                   Update: {
-                    "attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel"?: Database["public"]['Enums']["chat_channel"],"created_at"?: string,"deleted_at"?: string | null,"id"?: string,"mentions"?: (string)[],"reactions"?: NonNullable<Json>,"reply_to"?: string | null,"workspace_id"?: string
+                    "attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel"?: Database["public"]['Enums']["chat_channel"],"created_at"?: string,"deleted_at"?: string | null,"edited_at"?: string | null,"id"?: string,"mentions"?: (string)[],"reactions"?: NonNullable<Json>,"reply_to"?: string | null,"workspace_id"?: string
                   }
                   Relationships: [
                     {
@@ -724,6 +724,9 @@ isOneToOne: false
                            },
 "display_name":
 { Args: { "p_user": string }; Returns: string
+                           },
+"edit_message":
+{ Args: { "p_body": string,"p_id": string }; Returns: undefined
                            },
 "is_agency":
 { Args: Record<PropertyKey, never>; Returns: boolean

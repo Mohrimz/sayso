@@ -73,7 +73,7 @@ export default async function PersonPage({ params }: PageProps<"/people/[id]">) 
     {
       icon: LogIn,
       label: "Last signed in",
-      value: lastSignIn ? `${formatDateTime(lastSignIn, AGENCY_TIME_ZONE)} (Sri Lanka time)` : <span className="text-faint">Never</span>,
+      value: lastSignIn ? formatDateTime(lastSignIn) : <span className="text-faint">Never</span>,
     },
   ];
 

@@ -88,6 +88,16 @@ export async function sendMessage(input: {
   return { ok: true, message, signed };
 }
 
+/** Changes the text of a message the viewer wrote. */
+export async function editMessage(id: string, body: string): Promise<{ ok: boolean; error?: string }> {
+  await requireViewer();
+  if (!isUuid(id) || typeof body !== "string") return { ok: false, error: "That message couldn't be changed." };
+  if (body.trim().length > MAX_MESSAGE_LENGTH) return { ok: false, error: `Messages can be up to ${MAX_MESSAGE_LENGTH} characters.` };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("edit_message", { p_id: id, p_body: body });
+  return error ? { ok: false, error: friendlyError(error) } : { ok: true };
+}
+
 /** Adds the viewer's reaction to a message, or removes it if it's already there. */
 export async function toggleReaction(id: string, emoji: string): Promise<{ ok: boolean; error?: string }> {
   await requireViewer();
