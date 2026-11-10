@@ -1,6 +1,9 @@
 "use client";
 
-import { Download, FileText, Film } from "lucide-react";
+import { useState } from "react";
+import { Dialog } from "radix-ui";
+import { ChevronLeft, ChevronRight, Download, FileText, Film, Loader2, X } from "lucide-react";
+import { toast } from "sonner";
 import { attachmentKind, formatBytes, type ChatAttachment } from "@/lib/chat";
 import { cn } from "@/lib/utils";
 import { MentionChip, type MentionedPerson } from "./mention-profile";
@@ -66,7 +69,115 @@ export function MessageText({ text, mine, mentions = [] }: { text: string; mine:
   );
 }
 
-/** Images and videos as previews, everything else as a download row. */
+/**
+ * Saves a chat file to the person's device. Files live on another address, so
+ * a plain download link would just open them; fetching a fresh copy first
+ * (the cached thumbnail lacks the headers fetch needs) lets the browser save it.
+ */
+async function saveFile(src: string, name: string) {
+  try {
+    const res = await fetch(src, { cache: "no-store" });
+    if (!res.ok) throw new Error(String(res.status));
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  } catch {
+    // Couldn't fetch it (e.g. the link expired): open it so it can still be saved by hand.
+    window.open(src, "_blank", "noopener");
+    toast.message("Opened in a new tab. Save it from there.");
+  }
+}
+
+function DownloadButton({ src, name, className }: { src: string; name: string; className?: string }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={async (e) => {
+        e.stopPropagation();
+        setBusy(true);
+        await saveFile(src, name);
+        setBusy(false);
+      }}
+      className={cn("inline-flex size-8 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition hover:bg-black/80", className)}
+      aria-label={`Download ${name}`}
+      title="Download"
+    >
+      {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Download className="size-4" aria-hidden />}
+    </button>
+  );
+}
+
+/** Full-size view of a message's photos, with download, and arrows when there are several. */
+function Lightbox({ images, start, onClose }: { images: { src: string; name: string }[]; start: number; onClose: () => void }) {
+  const [index, setIndex] = useState(start);
+  const current = images[Math.min(index, images.length - 1)];
+  const go = (to: number) => setIndex(Math.min(images.length - 1, Math.max(0, to)));
+  return (
+    <Dialog.Root open onOpenChange={(open) => !open && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/85" />
+        <Dialog.Content
+          className="fixed inset-0 z-[60] flex flex-col outline-none"
+          aria-describedby={undefined}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowRight") go(index + 1);
+            if (e.key === "ArrowLeft") go(index - 1);
+          }}
+        >
+          <div className="flex items-center gap-3 px-4 py-3 text-white">
+            <Dialog.Title className="min-w-0 flex-1 truncate text-sm font-medium">
+              {current.name}
+              {images.length > 1 ? <span className="ml-2 text-white/60 tabular-nums">{index + 1} / {images.length}</span> : null}
+            </Dialog.Title>
+            <DownloadButton src={current.src} name={current.name} className="size-9 bg-white/15 hover:bg-white/25" />
+            <Dialog.Close className="inline-flex size-9 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25" aria-label="Close preview">
+              <X className="size-5" aria-hidden />
+            </Dialog.Close>
+          </div>
+          <div className="relative flex min-h-0 flex-1 items-center justify-center px-4 pb-6" onClick={onClose}>
+            {/* eslint-disable-next-line @next/next/no-img-element -- signed storage URL, shown at its own size */}
+            <img key={current.src} src={current.src} alt={current.name} className="max-h-full max-w-full rounded-lg object-contain" onClick={(e) => e.stopPropagation()} />
+            {index > 0 ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  go(index - 1);
+                }}
+                className="absolute top-1/2 left-3 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"
+                aria-label="Previous photo"
+              >
+                <ChevronLeft className="size-6" aria-hidden />
+              </button>
+            ) : null}
+            {index < images.length - 1 ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  go(index + 1);
+                }}
+                className="absolute top-1/2 right-3 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"
+                aria-label="Next photo"
+              >
+                <ChevronRight className="size-6" aria-hidden />
+              </button>
+            ) : null}
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+/** Images and videos as previews (click a photo to see it full size), everything else as a download row. Each has a download button. */
 export function Attachments({
   files,
   signed,
@@ -78,9 +189,12 @@ export function Attachments({
   mine: boolean;
   onMediaLoad?: () => void;
 }) {
+  const [viewing, setViewing] = useState<number | null>(null);
   if (!files.length) return null;
   const media = files.filter((f) => attachmentKind(f.mime) !== "file");
   const docs = files.filter((f) => attachmentKind(f.mime) === "file");
+  const images = media.filter((f) => attachmentKind(f.mime) === "image" && signed[f.path]).map((f) => ({ path: f.path, src: signed[f.path], name: f.name }));
+  const overlay = "absolute top-1.5 right-1.5";
 
   return (
     <div className={cn("flex max-w-full flex-col gap-1.5", mine ? "items-end" : "items-start")}>
@@ -97,28 +211,28 @@ export function Attachments({
               );
             }
             return kind === "video" ? (
-              <video
-                key={f.path}
-                src={src}
-                controls
-                preload="metadata"
-                onLoadedMetadata={onMediaLoad}
-                className="max-h-72 w-full rounded-xl border border-line bg-ink object-contain"
-              />
+              <div key={f.path} className="group/media relative">
+                <video src={src} controls preload="metadata" onLoadedMetadata={onMediaLoad} className="max-h-72 w-full rounded-xl border border-line bg-ink object-contain" />
+                <DownloadButton src={src} name={f.name} className={overlay} />
+              </div>
             ) : (
-              <a key={f.path} href={src} target="_blank" rel="noopener noreferrer" className="block overflow-hidden rounded-xl border border-line bg-sunken">
-                {/* eslint-disable-next-line @next/next/no-img-element -- signed storage URLs, sized by the browser */}
-                <img
-                  src={src}
-                  alt={f.name}
-                  onLoad={onMediaLoad}
-                  className={cn("w-full object-cover transition hover:opacity-90", media.length > 1 ? "aspect-square" : "max-h-80")}
-                />
-              </a>
+              <div key={f.path} className="group/media relative overflow-hidden rounded-xl border border-line bg-sunken">
+                <button type="button" onClick={() => setViewing(images.findIndex((i) => i.path === f.path))} className="block w-full cursor-zoom-in" aria-label={`Open ${f.name}`}>
+                  {/* eslint-disable-next-line @next/next/no-img-element -- signed storage URLs, sized by the browser */}
+                  <img
+                    src={src}
+                    alt={f.name}
+                    onLoad={onMediaLoad}
+                    className={cn("w-full object-cover transition group-hover/media:opacity-90", media.length > 1 ? "aspect-square" : "max-h-80")}
+                  />
+                </button>
+                <DownloadButton src={src} name={f.name} className={overlay} />
+              </div>
             );
           })}
         </div>
       ) : null}
+      {viewing !== null && images[viewing] ? <Lightbox images={images} start={viewing} onClose={() => setViewing(null)} /> : null}
       {docs.map((f) => {
         const src = signed[f.path];
         return (

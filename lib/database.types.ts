@@ -333,14 +333,14 @@ isOneToOne: false
                   ]
                 },"messages": {
                   Row: {
-                    "attachments": NonNullable<Json>,"author_id": string | null,"body": string,"channel": Database["public"]['Enums']["chat_channel"],"created_at": string,"deleted_at": string | null,"id": string,"mentions": (string)[],"workspace_id": string
+                    "attachments": NonNullable<Json>,"author_id": string | null,"body": string,"channel": Database["public"]['Enums']["chat_channel"],"created_at": string,"deleted_at": string | null,"id": string,"mentions": (string)[],"reactions": NonNullable<Json>,"reply_to": string | null,"workspace_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel"?: Database["public"]['Enums']["chat_channel"],"created_at"?: string,"deleted_at"?: string | null,"id"?: string,"mentions"?: (string)[],"workspace_id": string
+                    "attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel"?: Database["public"]['Enums']["chat_channel"],"created_at"?: string,"deleted_at"?: string | null,"id"?: string,"mentions"?: (string)[],"reactions"?: NonNullable<Json>,"reply_to"?: string | null,"workspace_id": string
                   }
                   Update: {
-                    "attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel"?: Database["public"]['Enums']["chat_channel"],"created_at"?: string,"deleted_at"?: string | null,"id"?: string,"mentions"?: (string)[],"workspace_id"?: string
+                    "attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel"?: Database["public"]['Enums']["chat_channel"],"created_at"?: string,"deleted_at"?: string | null,"id"?: string,"mentions"?: (string)[],"reactions"?: NonNullable<Json>,"reply_to"?: string | null,"workspace_id"?: string
                   }
                   Relationships: [
                     {
@@ -348,6 +348,12 @@ isOneToOne: false
       columns: ["author_id"]
 isOneToOne: false
       referencedRelation: "profiles"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "messages_reply_to_fkey"
+      columns: ["reply_to"]
+isOneToOne: false
+      referencedRelation: "messages"
       referencedColumns: ["id"]
     },{
       foreignKeyName: "messages_workspace_id_fkey"
@@ -761,6 +767,9 @@ isOneToOne: false
 "profile_missing":
 { Args: { "p": Omit<Database["public"]['Tables']["profiles"]['Row'], Database["public"]['Tables']["profiles"]['ComputedFields']> }; Returns: (string)[]
                            },
+"reorder_post_media":
+{ Args: { "p_item": string,"p_keys": (string)[] }; Returns: undefined
+                           },
 "request_publish":
 { Args: { "p_item": string }; Returns: undefined
                            },
@@ -778,6 +787,9 @@ isOneToOne: false
                            },
 "submit_task_work":
 { Args: { "p_files": Json,"p_item": string,"p_note": string,"p_task": string }; Returns: string
+                           },
+"toggle_reaction":
+{ Args: { "p_emoji": string,"p_message": string }; Returns: Json
                            },
 "touch_last_seen":
 { Args: Record<PropertyKey, never>; Returns: undefined

@@ -12,18 +12,19 @@ import {
   useSyncExternalStore,
 } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { AlertDialog, DropdownMenu } from "radix-ui";
+import { AlertDialog, DropdownMenu, Popover } from "radix-ui";
 import type { RealtimeChannel } from "@supabase/supabase-js";
-import { ArrowDown, Copy, Lock, MessagesSquare, MoreHorizontal, RotateCw, Trash2, UploadCloud, X } from "lucide-react";
+import { ArrowDown, Copy, CornerUpLeft, Lock, SmilePlus, MessagesSquare, MoreHorizontal, RotateCw, Trash2, UploadCloud, X } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
-import { deleteMessage, sendMessage, type SendResult } from "@/app/actions/chat";
+import { deleteMessage, sendMessage, toggleReaction, type SendResult } from "@/app/actions/chat";
 import { Avatar, buttonClass } from "@/components/ui";
 import {
   CHAT_PAGE_SIZE,
   chatHref,
   MESSAGE_COLUMNS,
   newId,
+  REACTIONS,
   toChatMessage,
   type ChatAttachment,
   type ChatChannel,
@@ -39,6 +40,18 @@ import { Attachments, MessageText, TypingDots } from "./message-parts";
 import type { MentionedPerson } from "./mention-profile";
 
 type Row = ChatMessage & { pending?: boolean; failed?: string };
+/** A reply's quote. "loaded" means the original is on screen, so the quote can jump to it. */
+type Quote = { id: string; name: string; text: string; loaded: boolean };
+
+/** One line standing in for a message: its text, or what it attached. */
+function messagePreview(m: ChatMessage): string {
+  const text = m.body.replace(/\s+/g, " ").trim();
+  if (text) return text.length > 140 ? `${text.slice(0, 140)}…` : text;
+  const n = m.attachments.length;
+  if (!n) return "Message";
+  const kind = m.attachments.every((a) => a.mime.startsWith("image/")) ? "photo" : m.attachments.every((a) => a.mime.startsWith("video/")) ? "video" : "file";
+  return n === 1 ? `Sent a ${kind}` : `Sent ${n} ${kind}s`;
+}
 type Entry =
   | { kind: "day"; key: string; label: string }
   | { kind: "unread"; key: string }
@@ -141,6 +154,11 @@ export function ChatRoom({
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [confirming, setConfirming] = useState<Row | null>(null);
+  // The message being replied to (shown above the message box until sent or cancelled).
+  const [replyingTo, setReplyingTo] = useState<Row | null>(null);
+  // Replied-to messages that are older than what's loaded, fetched for their quote.
+  const [quoted, setQuoted] = useState<Record<string, ChatMessage | null>>({});
+  const [flash, setFlash] = useState<string | null>(null);
   // Messages that were already there (first load, earlier pages) appear without animation.
   const [quiet, setQuiet] = useState(() => new Set(initial.messages.map((m) => m.id)));
 
@@ -250,6 +268,29 @@ export function ChatRoom({
       return next;
     });
   }
+
+  // Replies to messages older than what's loaded: fetch those originals for their quotes.
+  const wantedQuotes = [...new Set(rows.map((r) => r.reply_to).filter((id): id is string => Boolean(id)))]
+    .filter((id) => !(id in quoted) && !rows.some((r) => r.id === id))
+    .sort()
+    .join(",");
+  useEffect(() => {
+    if (!wantedQuotes) return;
+    const ids = wantedQuotes.split(",");
+    let cancelled = false;
+    void (async () => {
+      const { data } = await createClient().from("messages").select(MESSAGE_COLUMNS).in("id", ids);
+      if (cancelled) return;
+      const found = (data ?? []).map(toChatMessage);
+      // Ones that don't come back are gone (or not ours to see): remembered as null.
+      setQuoted((current) => ({ ...current, ...Object.fromEntries(ids.map((id) => [id, found.find((m) => m.id === id) ?? null])) }));
+      void ensurePeople(found.map((m) => m.author_id));
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the ids still missing
+  }, [wantedQuotes]);
 
   async function ensureSigned(files: ChatAttachment[]) {
     const missing = [...new Set(files.map((f) => f.path).filter((p) => !signed[p]))];
@@ -416,7 +457,7 @@ export function ChatRoom({
   async function deliver(row: Row) {
     let result: SendResult;
     try {
-      result = await sendMessage({ id: row.id, workspaceId: workspace.id, channel, body: row.body, attachments: row.attachments, mentions: row.mentions });
+      result = await sendMessage({ id: row.id, workspaceId: workspace.id, channel, body: row.body, attachments: row.attachments, mentions: row.mentions, replyTo: row.reply_to });
     } catch {
       result = { ok: false, error: "Couldn't reach the server. Check your connection and try again." };
     }
@@ -438,10 +479,13 @@ export function ChatRoom({
       body,
       attachments,
       mentions,
+      reply_to: replyingTo?.id ?? null,
+      reactions: {},
       created_at: new Date().toISOString(),
       deleted_at: null,
       pending: true,
     };
+    setReplyingTo(null);
     if (Object.keys(previews).length) setSigned((current) => ({ ...current, ...previews }));
     nearBottom.current = true;
     setNewBelow(0);
@@ -472,6 +516,47 @@ export function ChatRoom({
       if (before) setRows((current) => current.map((r) => (r.id === row.id ? before : r)));
       toast.error(result.error ?? "That message couldn't be deleted.");
     }
+  }
+
+  /** What a reply shows above its text: who it answers and the start of that message. */
+  function quoteFor(row: Row): Quote | undefined {
+    if (!row.reply_to) return undefined;
+    const target = rows.find((r) => r.id === row.reply_to) ?? quoted[row.reply_to];
+    if (target === undefined) return { id: row.reply_to, name: "", text: "Loading…", loaded: false };
+    if (target === null || target.deleted_at) return { id: row.reply_to, name: "", text: "Message deleted", loaded: false };
+    const author = target.author_id === viewer.id ? "You" : ((target.author_id && people[target.author_id]?.name) || "Former member");
+    return { id: target.id, name: author, text: messagePreview(target), loaded: rows.some((r) => r.id === target.id) };
+  }
+
+  /** Scrolls to a quoted message and highlights it briefly. */
+  function jumpTo(id: string) {
+    const el = list.current?.querySelector(`[data-message="${id}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    setFlash(id);
+    window.setTimeout(() => setFlash((current) => (current === id ? null : current)), 1600);
+  }
+
+  /** Adds or removes the viewer's reaction straight away, then saves it. */
+  async function react(row: Row, emoji: string) {
+    const flip = (r: Row): Row => {
+      const people = r.reactions[emoji] ?? [];
+      const next = people.includes(viewer.id) ? people.filter((p) => p !== viewer.id) : [...people, viewer.id];
+      const reactions = { ...r.reactions, [emoji]: next };
+      if (!next.length) delete reactions[emoji];
+      return { ...r, reactions };
+    };
+    setRows((current) => current.map((r) => (r.id === row.id ? flip(r) : r)));
+    const result = await toggleReaction(row.id, emoji).catch(() => ({ ok: false, error: "Couldn't reach the server." }));
+    if (!result.ok) {
+      setRows((current) => current.map((r) => (r.id === row.id ? flip(r) : r)));
+      toast.error(result.error ?? "That reaction couldn't be saved.");
+    }
+  }
+
+  function startReply(row: Row) {
+    setReplyingTo(row);
+    composer.current?.focus();
   }
 
   async function loadOlder() {
@@ -675,6 +760,13 @@ export function ChatRoom({
                   signed={signed}
                   canDelete={entry.row.author_id === viewer.id || viewer.isAdmin}
                   animate={!quiet.has(entry.row.id)}
+                  quote={quoteFor(entry.row)}
+                  highlighted={flash === entry.row.id}
+                  onReply={() => startReply(entry.row)}
+                  viewerId={viewer.id}
+                  nameOf={(id) => (id === viewer.id ? "You" : (people[id]?.name ?? "Former member"))}
+                  onReact={(emoji) => void react(entry.row, emoji)}
+                  onJump={jumpTo}
                   onMediaLoad={keepPinned}
                   onDelete={() => setConfirming(entry.row)}
                   onRetry={() => retry(entry.row)}
@@ -706,6 +798,21 @@ export function ChatRoom({
             </motion.button>
           ) : null}
         </AnimatePresence>
+
+        {replyingTo ? (
+          <div className="mx-3 mb-1 flex items-center gap-2 rounded-xl border-l-[3px] border-accent bg-sunken px-3 py-2 sm:mx-5">
+            <CornerUpLeft className="size-4 shrink-0 text-accent" aria-hidden />
+            <p className="min-w-0 flex-1 text-[13px]">
+              <span className="font-semibold text-ink">
+                Replying to {replyingTo.author_id === viewer.id ? "yourself" : ((replyingTo.author_id && people[replyingTo.author_id]?.name) || "Former member")}
+              </span>
+              <span className="block truncate text-muted">{messagePreview(replyingTo)}</span>
+            </p>
+            <button type="button" onClick={() => setReplyingTo(null)} className="rounded-md p-1 text-muted hover:bg-surface hover:text-ink" aria-label="Cancel reply">
+              <X className="size-4" aria-hidden />
+            </button>
+          </div>
+        ) : null}
 
         <Composer
           ref={composer}
@@ -757,11 +864,27 @@ function MessageRow({
   signed,
   canDelete,
   animate,
+  quote,
+  highlighted,
+  onReply,
+  onJump,
+  viewerId,
+  nameOf,
+  onReact,
   onMediaLoad,
   onDelete,
   onRetry,
   onDiscard,
 }: {
+  /** The message this one replies to, shown as a small quote above it. */
+  quote?: Quote;
+  /** Briefly true after someone jumps here from a reply's quote. */
+  highlighted: boolean;
+  onReply: () => void;
+  onJump: (id: string) => void;
+  viewerId: string;
+  nameOf: (id: string) => string;
+  onReact: (emoji: string) => void;
   entry: Extract<Entry, { kind: "message" }>;
   person?: ChatPerson;
   /** People @mentioned in this message; "me" marks the viewer. Tapping one opens their profile card. */
@@ -782,9 +905,47 @@ function MessageRow({
   const time = clock.format(new Date(row.created_at));
   const deleted = Boolean(row.deleted_at);
   const hasBody = row.body.length > 0;
+  const [picking, setPicking] = useState(false);
 
   const menu =
-    !deleted && !row.pending && !row.failed && (hasBody || canDelete) ? (
+    !deleted && !row.pending && !row.failed ? (
+      <div className="flex shrink-0 items-center self-center">
+      <button
+        type="button"
+        onClick={onReply}
+        className="inline-flex size-7 items-center justify-center rounded-full text-faint opacity-0 transition group-hover:opacity-100 hover:bg-sunken hover:text-ink focus-visible:opacity-100 [@media(hover:none)]:opacity-60"
+        aria-label="Reply"
+        title="Reply"
+      >
+        <CornerUpLeft className="size-4" aria-hidden />
+      </button>
+      <Popover.Root open={picking} onOpenChange={setPicking}>
+        <Popover.Trigger
+          className="inline-flex size-7 items-center justify-center rounded-full text-faint opacity-0 transition group-hover:opacity-100 hover:bg-sunken hover:text-ink focus-visible:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-60"
+          aria-label="React"
+          title="React"
+        >
+          <SmilePlus className="size-4" aria-hidden />
+        </Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Content side="top" sideOffset={6} className="animate-pop z-50 flex gap-0.5 rounded-full border border-line bg-surface p-1 shadow-xl shadow-black/10">
+            {REACTIONS.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => {
+                  setPicking(false);
+                  onReact(emoji);
+                }}
+                className={cn("flex size-9 items-center justify-center rounded-full text-xl transition hover:scale-125 hover:bg-sunken", row.reactions[emoji]?.includes(viewerId) && "bg-accent-soft")}
+                aria-label={`React with ${emoji}`}
+              >
+                {emoji}
+              </button>
+            ))}
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover.Root>
       <DropdownMenu.Root>
         <DropdownMenu.Trigger
           className="inline-flex size-7 shrink-0 items-center justify-center self-center rounded-full text-faint opacity-0 transition group-hover:opacity-100 hover:bg-sunken hover:text-ink focus-visible:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-60"
@@ -798,6 +959,12 @@ function MessageRow({
             sideOffset={4}
             className="animate-pop z-50 min-w-40 rounded-xl border border-line bg-surface p-1.5 shadow-xl shadow-black/10"
           >
+            <DropdownMenu.Item
+              className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-ink-soft outline-none data-[highlighted]:bg-sunken data-[highlighted]:text-ink"
+              onSelect={onReply}
+            >
+              <CornerUpLeft className="size-4" aria-hidden /> Reply
+            </DropdownMenu.Item>
             {hasBody ? (
               <DropdownMenu.Item
                 className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-ink-soft outline-none data-[highlighted]:bg-sunken data-[highlighted]:text-ink"
@@ -819,12 +986,56 @@ function MessageRow({
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
+      </div>
     ) : null;
+
+  const reacted = Object.entries(row.reactions).filter(([, ids]) => ids.length);
+  const reactionChips = !deleted && reacted.length ? (
+    <div className={cn("mt-1 flex flex-wrap gap-1", mine ? "justify-end" : "justify-start")}>
+      {reacted.map(([emoji, ids]) => {
+        const byMe = ids.includes(viewerId);
+        return (
+          <button
+            key={emoji}
+            type="button"
+            onClick={() => onReact(emoji)}
+            title={ids.map(nameOf).join(", ")}
+            aria-label={`${emoji} ${ids.length}: ${ids.map(nameOf).join(", ")}. ${byMe ? "Remove your reaction" : "Add yours"}`}
+            aria-pressed={byMe}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[13px] leading-5 transition",
+              byMe ? "border-accent/50 bg-accent-soft text-accent-ink" : "border-line bg-surface text-ink-soft hover:bg-sunken",
+            )}
+          >
+            <span>{emoji}</span>
+            <span className="text-xs font-medium tabular-nums">{ids.length}</span>
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
+
+  const quoteCard = quote && !deleted ? (
+    <button
+      type="button"
+      onClick={() => quote.loaded && onJump(quote.id)}
+      disabled={!quote.loaded}
+      className={cn(
+        "mb-0.5 block max-w-full rounded-xl border-l-[3px] border-accent/70 bg-sunken/70 px-2.5 py-1.5 text-left text-xs",
+        quote.loaded && "cursor-pointer hover:bg-sunken",
+      )}
+      aria-label={quote.name ? `In reply to ${quote.name}: ${quote.text}` : quote.text}
+    >
+      {quote.name ? <span className="block font-semibold text-ink-soft">{quote.name}</span> : null}
+      <span className={cn("line-clamp-2 break-words text-muted", !quote.name && "italic")}>{quote.text}</span>
+    </button>
+  ) : null;
 
   const bubble = deleted ? (
     <div className="rounded-2xl border border-dashed border-line px-3 py-1.5 text-[13px] text-faint italic">Message deleted</div>
   ) : (
     <div className={cn("flex min-w-0 flex-col gap-1.5", mine ? "items-end" : "items-start")}>
+      {quoteCard}
       {hasBody ? (
         <div
           title={time}
@@ -848,7 +1059,13 @@ function MessageRow({
       initial={animate ? { opacity: 0, y: 8 } : false}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18 }}
-      className={cn("group flex gap-2", mine ? "justify-end" : "justify-start", first ? "mt-3" : "mt-0.5")}
+      data-message={row.id}
+      className={cn(
+        "group flex gap-2 rounded-xl transition-colors duration-700",
+        mine ? "justify-end" : "justify-start",
+        first || quote ? "mt-3" : "mt-0.5",
+        highlighted && "bg-accent-soft",
+      )}
     >
       {!mine ? <div className="w-8 shrink-0 pt-5">{first ? <Avatar name={name} src={person?.avatar} /> : null}</div> : null}
       <div className={cn("flex max-w-[85%] min-w-0 flex-col sm:max-w-[70%]", mine ? "items-end" : "items-start")}>
@@ -866,6 +1083,7 @@ function MessageRow({
           {bubble}
           {!mine ? menu : null}
         </div>
+        {reactionChips}
         {row.failed ? (
           <div className="mt-1 flex flex-wrap items-center justify-end gap-x-2 px-1 text-[11px]" role="alert">
             <span className="text-danger">Not sent. {row.failed}</span>

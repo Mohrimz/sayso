@@ -7,7 +7,7 @@ import { getAgencyAssignees, getPeople, getWorkspaceMembers } from "@/lib/querie
 import { parseMedia, signMedia } from "@/lib/media";
 import { CONTENT_TYPES, captionFor, platformLabel } from "@/lib/content";
 import { defaultApprovalDeadline, formatDateTime, isoToZonedInput } from "@/lib/dates";
-import { asArray, asObject, type ApprovalRuleEntry, type ContentItem, type SocialAccount } from "@/lib/types";
+import { asArray, asObject, type ApprovalRuleEntry, type ContentItem } from "@/lib/types";
 import { Badge, Card } from "@/components/ui";
 import { PostResultsCard } from "@/components/post-results-card";
 import { initialResultsView } from "@/lib/post-results";
@@ -19,7 +19,7 @@ import { ContentForm } from "@/components/content-form";
 import { CopyButton } from "@/components/copy-button";
 import { DeadlineText } from "@/components/content-card";
 import { MediaUploader } from "@/components/media-uploader";
-import { PhonePreview } from "@/components/phone-preview";
+import { PostPreview } from "@/components/post-preview";
 import { RealtimeRefresh } from "@/components/realtime-refresh";
 import { Sheet } from "@/components/sheet";
 import { StatusBadge } from "@/components/status-badge";
@@ -92,10 +92,11 @@ export default async function ContentPage({ params, searchParams }: PageProps<"/
   const myResponse = sentApprovals.find((a) => a.approver_id === viewer.id);
   const approvedCount = new Set(sentApprovals.filter((a) => a.decision === "approved").map((a) => a.approver_id)).size;
 
-  const handle = asArray<SocialAccount>(workspace.social_accounts).find((a) => a.platform === "instagram")?.handle ?? workspace.slug.replace(/-/g, "");
   const trackedLinks = asObject<Record<string, string>>(source.tracked_links);
   const captions = asObject<Record<string, string>>(source.captions);
   const editable = can.editContent && ["planned", "draft", "internal_review"].includes(item.status);
+  // The order of the photos and the caption can be changed in place: agency, post still in progress, looking at the latest version.
+  const arranging = editable && (!shown || shown.id === versions[0]?.id);
   // Saved Instagram results only; the card fetches fresh numbers itself when these are out of date.
   const results = await initialResultsView(item, workspace);
   // Whether "Publish now" can post the approved version straight to Instagram and Facebook.
@@ -203,13 +204,16 @@ export default async function ContentPage({ params, searchParams }: PageProps<"/
       <div className="fold-split grid gap-6 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)] xl:items-start">
         <FadeIn className="space-y-3 xl:sticky xl:top-20">
           {shown || can.isAgency ? (
-            <PhonePreview
-              type={item.type}
+            <PostPreview
+              // A fresh preview whenever the files or their order change (new version, or reordered by someone else).
+              key={`${shown?.id ?? "none"}:${media.map((m) => m.path ?? m.url).join("|")}`}
+              itemId={item.id}
               media={media}
-              handle={handle}
-              caption={captionFor(source.captions, item.platforms[0])}
-              hashtags={source.hashtags}
-              onScreenText={source.on_screen_text}
+              caption={arranging ? captionFor(item.captions) : captionFor(source.captions, item.platforms[0])}
+              hashtags={arranging ? item.hashtags : source.hashtags}
+              canArrange={arranging}
+              canEditCaption={arranging}
+              hasPlatformCaptions={Object.keys(asObject<Record<string, string>>(item.captions)).some((k) => k !== "default")}
             />
           ) : (
             <Card className="p-6 text-center">

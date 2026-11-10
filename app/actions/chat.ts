@@ -36,6 +36,8 @@ export async function sendMessage(input: {
   attachments: ChatAttachment[];
   /** People @mentioned. The database keeps only people who can read this chat. */
   mentions?: string[];
+  /** The message being replied to. The database drops it unless it's in this conversation. */
+  replyTo?: string | null;
 }): Promise<SendResult> {
   const viewer = await requireViewer();
   const { id, workspaceId, channel } = input ?? {};
@@ -66,7 +68,7 @@ export async function sendMessage(input: {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("messages")
-    .insert({ id, workspace_id: workspaceId, channel, author_id: viewer.id, body, attachments, mentions })
+    .insert({ id, workspace_id: workspaceId, channel, author_id: viewer.id, body, attachments, mentions, reply_to: isUuid(input.replyTo) ? input.replyTo : null })
     .select(MESSAGE_COLUMNS)
     .single();
 
@@ -84,6 +86,15 @@ export async function sendMessage(input: {
   const message = toChatMessage(row);
   const signed = await signChatFiles(message.attachments.map((a) => a.path));
   return { ok: true, message, signed };
+}
+
+/** Adds the viewer's reaction to a message, or removes it if it's already there. */
+export async function toggleReaction(id: string, emoji: string): Promise<{ ok: boolean; error?: string }> {
+  await requireViewer();
+  if (!isUuid(id) || typeof emoji !== "string" || emoji.length > 16) return { ok: false, error: "That reaction couldn't be saved." };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("toggle_reaction", { p_message: id, p_emoji: emoji });
+  return error ? { ok: false, error: friendlyError(error) } : { ok: true };
 }
 
 /** Deletes a message (authors, or agency admins) and removes its files. */

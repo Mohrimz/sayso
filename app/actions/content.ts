@@ -175,6 +175,32 @@ export async function addContentVersion(itemId: string, media: MediaFile[], note
   return done("New version uploaded.");
 }
 
+/** Changes which photo or video comes first. keys are each file's path (or link), in the new order. */
+export async function reorderMedia(itemId: string, keys: string[]): Promise<ActionState> {
+  const ctx = await itemAccess(itemId);
+  if (!ctx?.access.can.editContent) return fail("Only the agency team can change the order.");
+  if (!Array.isArray(keys) || keys.length < 2 || keys.length > 50 || keys.some((k) => typeof k !== "string")) return fail("That order couldn't be saved.");
+  const { error } = await ctx.supabase.rpc("reorder_post_media", { p_item: ctx.item.id, p_keys: keys });
+  if (error) return fail(friendlyError(error));
+  refresh();
+  return done("Order saved.");
+}
+
+/** Saves the caption and hashtags from the box under the preview (the same fields as the Edit form). */
+export async function saveCaption(itemId: string, caption: string, hashtags: string): Promise<ActionState> {
+  const ctx = await itemAccess(itemId);
+  if (!ctx?.access.can.editContent) return fail("Only the agency team can edit the caption.");
+  if (typeof caption !== "string" || typeof hashtags !== "string" || caption.length > 5000 || hashtags.length > 1000) return fail("That caption is too long.");
+  const existing = ctx.item.captions && typeof ctx.item.captions === "object" && !Array.isArray(ctx.item.captions) ? (ctx.item.captions as Record<string, string>) : {};
+  const { error } = await ctx.supabase
+    .from("content_items")
+    .update({ captions: { ...existing, default: caption.trim() }, hashtags: hashtags.trim() || null })
+    .eq("id", ctx.item.id);
+  if (error) return fail(friendlyError(error));
+  refresh();
+  return done("Caption saved.");
+}
+
 const AGENCY_MOVES: ContentStatus[] = ["planned", "draft", "internal_review", "approved", "scheduled", "published"];
 
 export async function moveContent(_: ActionState, fd: FormData): Promise<ActionState> {

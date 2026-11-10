@@ -17,6 +17,10 @@ export type ChatMessage = {
   attachments: ChatAttachment[];
   /** People @mentioned in the message (the text keeps plain "@Name"). */
   mentions: string[];
+  /** The message this one answers, if any. */
+  reply_to: string | null;
+  /** Emoji reactions: each emoji with the ids of the people who chose it. */
+  reactions: Record<string, string[]>;
   created_at: string;
   deleted_at: string | null;
 };
@@ -45,7 +49,7 @@ export const MAX_FILE_BYTES = 50 * 1024 * 1024;
 /** Signed file links stay valid for a working day, so long-open chats keep their images. */
 export const SIGNED_URL_TTL = 60 * 60 * 12;
 
-export const MESSAGE_COLUMNS = "id, author_id, body, attachments, mentions, created_at, deleted_at";
+export const MESSAGE_COLUMNS = "id, author_id, body, attachments, mentions, reply_to, reactions, created_at, deleted_at";
 export const MAX_MENTIONS = 20;
 
 export function isChannel(value: unknown): value is ChatChannel {
@@ -64,6 +68,19 @@ export function chatKey(workspaceId: string, channel: ChatChannel) {
 /** "<workspace>/<channel>/" — every attachment path must start with this. */
 export function attachmentPrefix(workspaceId: string, channel: ChatChannel) {
   return `${workspaceId}/${channel}/`;
+}
+
+/** The reactions people can choose, in the order they're offered. */
+export const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"] as const;
+
+export function parseReactions(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [emoji, people] of Object.entries(value)) {
+    const ids = Array.isArray(people) ? people.filter((p): p is string => typeof p === "string") : [];
+    if (ids.length) out[emoji] = ids;
+  }
+  return out;
 }
 
 export function parseAttachments(value: unknown): ChatAttachment[] {
@@ -85,6 +102,8 @@ export function toChatMessage(row: {
   body: string;
   attachments: unknown;
   mentions?: unknown;
+  reply_to?: unknown;
+  reactions?: unknown;
   created_at: string;
   deleted_at: string | null;
 }): ChatMessage {
@@ -94,6 +113,8 @@ export function toChatMessage(row: {
     body: row.body ?? "",
     attachments: parseAttachments(row.attachments),
     mentions: Array.isArray(row.mentions) ? row.mentions.filter((m): m is string => typeof m === "string") : [],
+    reply_to: typeof row.reply_to === "string" ? row.reply_to : null,
+    reactions: parseReactions(row.reactions),
     created_at: row.created_at,
     deleted_at: row.deleted_at,
   };

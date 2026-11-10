@@ -29,7 +29,7 @@ The screenshots use a made-up client, Luma Candle Co.
 
 ### For the client: preview, then approve
 
-Each post is shown in a phone frame, with its caption and hashtags, the way it will look on Instagram. The client approves it or says what to change.
+Each post shows its photos and videos exactly as uploaded, with the caption and hashtags underneath. The client swipes through them, then approves the post or says what to change.
 
 <p align="center">
   <img src="docs/screenshots/approve.png" alt="A client reviewing a post, with Approve and Request changes buttons" width="900">
@@ -97,7 +97,7 @@ The Team page lists agency staff and clients, with when each person last used th
 | **Approval workflow** | Planned → Draft → Internal review → Client approval → Approved → Scheduled → Published. Every upload is kept as a version, and each approval records which version it was for. |
 | **Roles** | Agency admins, team members, client approvers and client viewers. Only an admin sends posts to the client or publishes them; team members send work to the admin for review. |
 | **Publishing** | One click posts an approved post to Instagram and Facebook, and its results (reach, likes, comments) come back into the portal. |
-| **Chat** | Real-time chat between each client and the agency team, with @mentions and attachments. |
+| **Chat** | Real-time chat between each client and the agency team, with @mentions, replies, emoji reactions, and photo previews with download. |
 | **Library** | Product photos, videos and files in one place. Download one, a few, or everything as a ZIP. |
 | **Offers** | Clients tell the agency about a sale or launch in their own words, so posts can be planned around it. |
 | **Tasks** | To-dos for the team and for the client, with a submit-and-review step for team work. |
