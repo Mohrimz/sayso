@@ -103,15 +103,16 @@ The Team page lists agency staff and clients, with when each person last used th
 | | |
 |---|---|
 | **Approval workflow** | Planned → Draft → Internal review → Client approval → Approved → Scheduled → Published. Every upload is kept as a version, and each approval records which version it was for. |
-| **Roles** | Agency admins, team members, client approvers and client viewers. Only an admin sends posts to the client or publishes them; team members send work to the admin for review. |
+| **Roles** | Agency admins, team members, client approvers and client viewers. Team members send their work to an admin for review. Once the admin marks it done, the person who made it sends it to the client, and the admin can see whether it has gone. Only an admin publishes. |
 | **Publishing** | One click posts an approved post to Instagram and Facebook, and its results (reach, likes, comments) come back into the portal. |
-| **Chat** | Real-time chat between each client and the agency team: @mentions, replies, emoji reactions, editing your own messages, and photo previews with download. |
-| **Library** | Product photos, videos and files in one place. Download one, a few, or everything as a ZIP. |
+| **Chat** | Real-time chat between each client and the agency team, plus a Direct chat between the client and the agency admins: @mentions, replies (including replying privately), emoji reactions, editing your own messages, photo previews with download, and "Seen by" for the agency. |
+| **Library** | Product photos, videos and files in one place. Clients can add files too, which land in their own folder. Download one, a few, or everything as a ZIP. |
 | **Offers** | Clients tell the agency about a sale or launch in their own words, so posts can be planned around it. |
-| **Tasks** | To-dos for the team and for the client, with a submit-and-review step for team work. |
+| **Tasks** | To-dos for the team and for the client, with a submit-and-review step for team work. Team members can also send work for review that was never on the board. |
 | **Notifications** | In the portal and by email, and each person chooses which ones are emailed. |
 | **Two time zones** | Every time is shown twice, in the audience's time zone and the agency's, for example "19:30 PT · 09:00 LK". |
 | **Arranging posts** | Reorder a post's photos by dragging, and write the caption right under the preview. |
+| **3D touches** | A wax seal is pressed onto each post the client approves. On the Brand kit page, the client's logo sits on a 3D tile that turns toward the mouse. Carousels wait behind each other like a stack of prints, cards lean toward the mouse, and empty screens get small 3D pictures. Each one has a still version for people who turn off motion. |
 | **Assistant** | A built-in assistant for agency staff that answers questions like "what needs my attention today?" |
 | **Privacy** | Each client sees only their own workspace. Clients never see internal notes, drafts or other clients. This is enforced in the database, not just hidden in the interface. |
 
@@ -121,6 +122,7 @@ The Team page lists agency staff and clients, with when each person last used th
 - **[Supabase](https://supabase.com)** for the database (Postgres with row-level security), sign-in and real-time updates
 - **[Cloudflare R2](https://developers.cloudflare.com/r2/)** for files
 - **[Tailwind CSS 4](https://tailwindcss.com)**, [Radix UI](https://www.radix-ui.com) and [Motion](https://motion.dev) for the interface
+- **[three.js](https://threejs.org)** for the 3D logo and the rendered 3D pictures
 - **[Resend](https://resend.com)** for email
 - **[Make](https://www.make.com)** for publishing to Instagram and Facebook
 - **[Claude](https://www.anthropic.com/claude)** for the assistant

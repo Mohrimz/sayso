@@ -9,6 +9,8 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { LibraryUploader } from "@/components/library/library-uploader";
 import { updateBrandKit } from "@/app/actions/workspaces";
 import { Sheet } from "@/components/sheet";
+import { BrandTile3D } from "@/components/brand-tile-3d";
+import { avatarUrl } from "@/lib/avatar";
 
 export default async function BrandKitPage({ params }: PageProps<"/w/[slug]/brand">) {
   const { slug } = await params;
@@ -33,9 +35,12 @@ export default async function BrandKitPage({ params }: PageProps<"/w/[slug]/bran
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Brand kit</h1>
-          <p className="mt-1 text-sm text-muted">How content should look and sound.</p>
+        <div className="flex items-center gap-5 sm:gap-6">
+          <BrandTile3D name={workspace.name} logo={avatarUrl(workspace.logo_path)} className="size-20 sm:size-24" />
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Brand kit</h1>
+            <p className="mt-1 text-sm text-muted">How content should look and sound.</p>
+          </div>
         </div>
         {can.editBrandKit ? <BrandEditor workspaceId={workspace.id} kit={kit} colours={colours} fonts={fonts} faq={faq} /> : null}
       </div>
@@ -142,9 +147,9 @@ export default async function BrandKitPage({ params }: PageProps<"/w/[slug]/bran
         ) : (
           <EmptyState
             title="No brand files yet"
-            action={can.uploadFiles ? <LibraryUploader workspaceId={workspace.id} folders={folders} defaultFolder="Brand" /> : null}
+            action={can.isAgency ? <LibraryUploader workspaceId={workspace.id} folders={folders} defaultFolder="Brand" /> : null}
           >
-            {can.uploadFiles ? "Upload logos and brand guidelines so the team always has the latest." : null}
+            {can.isAgency ? "Upload logos and brand guidelines so the team always has the latest." : "Have logos or brand guidelines to share? Add them in the Library."}
           </EmptyState>
         )}
       </Card>

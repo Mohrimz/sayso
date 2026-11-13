@@ -675,14 +675,14 @@ isOneToOne: false
                   ]
                 },"workspaces": {
                   Row: {
-                    "approval_rule": Database["public"]['Enums']["approval_rule"],"baseline": NonNullable<Json>,"created_at": string,"facebook_page_id": string | null,"goals_focus": string | null,"id": string,"instagram_account_id": string | null,"main_contact_email": string | null,"main_contact_name": string | null,"name": string,"quotas": NonNullable<Json>,"revision_rounds": number,"rules": NonNullable<Json>,"slug": string,"social_accounts": NonNullable<Json>,"status": Database["public"]['Enums']["workspace_status"],"success_measures": string | null,"time_zone": string,"updated_at": string,"website": string | null
+                    "approval_rule": Database["public"]['Enums']["approval_rule"],"baseline": NonNullable<Json>,"created_at": string,"facebook_page_id": string | null,"goals_focus": string | null,"id": string,"instagram_account_id": string | null,"logo_path": string | null,"main_contact_email": string | null,"main_contact_name": string | null,"name": string,"quotas": NonNullable<Json>,"revision_rounds": number,"rules": NonNullable<Json>,"slug": string,"social_accounts": NonNullable<Json>,"status": Database["public"]['Enums']["workspace_status"],"success_measures": string | null,"time_zone": string,"updated_at": string,"website": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "approval_rule"?: Database["public"]['Enums']["approval_rule"],"baseline"?: NonNullable<Json>,"created_at"?: string,"facebook_page_id"?: string | null,"goals_focus"?: string | null,"id"?: string,"instagram_account_id"?: string | null,"main_contact_email"?: string | null,"main_contact_name"?: string | null,"name": string,"quotas"?: NonNullable<Json>,"revision_rounds"?: number,"rules"?: NonNullable<Json>,"slug": string,"social_accounts"?: NonNullable<Json>,"status"?: Database["public"]['Enums']["workspace_status"],"success_measures"?: string | null,"time_zone"?: string,"updated_at"?: string,"website"?: string | null
+                    "approval_rule"?: Database["public"]['Enums']["approval_rule"],"baseline"?: NonNullable<Json>,"created_at"?: string,"facebook_page_id"?: string | null,"goals_focus"?: string | null,"id"?: string,"instagram_account_id"?: string | null,"logo_path"?: string | null,"main_contact_email"?: string | null,"main_contact_name"?: string | null,"name": string,"quotas"?: NonNullable<Json>,"revision_rounds"?: number,"rules"?: NonNullable<Json>,"slug": string,"social_accounts"?: NonNullable<Json>,"status"?: Database["public"]['Enums']["workspace_status"],"success_measures"?: string | null,"time_zone"?: string,"updated_at"?: string,"website"?: string | null
                   }
                   Update: {
-                    "approval_rule"?: Database["public"]['Enums']["approval_rule"],"baseline"?: NonNullable<Json>,"created_at"?: string,"facebook_page_id"?: string | null,"goals_focus"?: string | null,"id"?: string,"instagram_account_id"?: string | null,"main_contact_email"?: string | null,"main_contact_name"?: string | null,"name"?: string,"quotas"?: NonNullable<Json>,"revision_rounds"?: number,"rules"?: NonNullable<Json>,"slug"?: string,"social_accounts"?: NonNullable<Json>,"status"?: Database["public"]['Enums']["workspace_status"],"success_measures"?: string | null,"time_zone"?: string,"updated_at"?: string,"website"?: string | null
+                    "approval_rule"?: Database["public"]['Enums']["approval_rule"],"baseline"?: NonNullable<Json>,"created_at"?: string,"facebook_page_id"?: string | null,"goals_focus"?: string | null,"id"?: string,"instagram_account_id"?: string | null,"logo_path"?: string | null,"main_contact_email"?: string | null,"main_contact_name"?: string | null,"name"?: string,"quotas"?: NonNullable<Json>,"revision_rounds"?: number,"rules"?: NonNullable<Json>,"slug"?: string,"social_accounts"?: NonNullable<Json>,"status"?: Database["public"]['Enums']["workspace_status"],"success_measures"?: string | null,"time_zone"?: string,"updated_at"?: string,"website"?: string | null
                   }
                   Relationships: [
                     
@@ -779,6 +779,9 @@ isOneToOne: false
 "review_task_work":
 { Args: { "p_decision": string,"p_note": string,"p_task": string }; Returns: undefined
                            },
+"send_approved_work":
+{ Args: { "p_deadline"?: string,"p_item": string }; Returns: string
+                           },
 "send_for_approval":
 { Args: { "p_deadline"?: string,"p_item": string }; Returns: string
                            },
@@ -808,7 +811,7 @@ isOneToOne: false
                            }
           }
           Enums: {
-            "agency_role": "admin"|"member","approval_decision": "approved"|"changes_requested","approval_rule": "any"|"all","chat_channel": "client"|"team","content_status": "planned"|"draft"|"internal_review"|"client_review"|"approved"|"scheduled"|"published","content_type": "feed_post"|"carousel"|"reel"|"story","internal_decision": "passed"|"fixes_needed","member_role": "team_member"|"approver"|"viewer","plan_status": "draft"|"active"|"closed","task_status": "todo"|"in_progress"|"in_review"|"done","user_side": "agency"|"client","workspace_status": "onboarding"|"active"|"paused"|"archived"
+            "agency_role": "admin"|"member","approval_decision": "approved"|"changes_requested","approval_rule": "any"|"all","chat_channel": "client"|"team"|"direct","content_status": "planned"|"draft"|"internal_review"|"client_review"|"approved"|"scheduled"|"published","content_type": "feed_post"|"carousel"|"reel"|"story","internal_decision": "passed"|"fixes_needed","member_role": "team_member"|"approver"|"viewer","plan_status": "draft"|"active"|"closed","task_status": "todo"|"in_progress"|"in_review"|"done","user_side": "agency"|"client","workspace_status": "onboarding"|"active"|"paused"|"archived"
           }
           CompositeTypes: {
             [_ in never]: never
@@ -928,7 +931,7 @@ export const Constants = {
           }
         },"public": {
           Enums: {
-            "agency_role": ["admin", "member"],"approval_decision": ["approved", "changes_requested"],"approval_rule": ["any", "all"],"chat_channel": ["client", "team"],"content_status": ["planned", "draft", "internal_review", "client_review", "approved", "scheduled", "published"],"content_type": ["feed_post", "carousel", "reel", "story"],"internal_decision": ["passed", "fixes_needed"],"member_role": ["team_member", "approver", "viewer"],"plan_status": ["draft", "active", "closed"],"task_status": ["todo", "in_progress", "in_review", "done"],"user_side": ["agency", "client"],"workspace_status": ["onboarding", "active", "paused", "archived"]
+            "agency_role": ["admin", "member"],"approval_decision": ["approved", "changes_requested"],"approval_rule": ["any", "all"],"chat_channel": ["client", "team", "direct"],"content_status": ["planned", "draft", "internal_review", "client_review", "approved", "scheduled", "published"],"content_type": ["feed_post", "carousel", "reel", "story"],"internal_decision": ["passed", "fixes_needed"],"member_role": ["team_member", "approver", "viewer"],"plan_status": ["draft", "active", "closed"],"task_status": ["todo", "in_progress", "in_review", "done"],"user_side": ["agency", "client"],"workspace_status": ["onboarding", "active", "paused", "archived"]
           }
         }
 } as const

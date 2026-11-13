@@ -214,7 +214,7 @@ export default async function WorkspaceHome({ params }: PageProps<"/w/[slug]">) 
               viewer={{ id: viewer.id, isAgency: can.isAgency, isAdmin: can.isAgency && viewer.agencyRole === "admin" }}
             />
           ) : (
-            <CaughtUp title={can.isAgency ? "No open tasks" : "Nothing needed from you"} />
+            <CaughtUp art="cards" title={can.isAgency ? "No open tasks" : "Nothing needed from you"} />
           )}
         </Card>
       </div>

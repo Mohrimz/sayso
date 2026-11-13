@@ -115,6 +115,7 @@ export function AssetGrid({ items, folders, zipName }: { items: AssetView[]; fol
             <li key={item.id}>
               <button
                 type="button"
+                data-tilt
                 onClick={() => (selecting ? toggle(item.id) : setOpenId(item.id))}
                 aria-pressed={selecting ? on : undefined}
                 aria-label={selecting ? `${on ? "Deselect" : "Select"} ${item.name}` : undefined}

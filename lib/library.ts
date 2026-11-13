@@ -11,6 +11,9 @@ export const ASSET_KINDS: { key: AssetKind; label: string }[] = [
 /** Folders offered when uploading. People can also type their own. */
 export const SUGGESTED_FOLDERS = ["Product photos", "Product videos", "Brand", "Team and behind the scenes", "Customer content", "Documents"];
 
+/** Where everything a client uploads goes, so it never mixes with the agency's folders (the database enforces it too). */
+export const CLIENT_FOLDER = "From the client";
+
 export const MAX_FILE_BYTES = 500 * 1024 * 1024;
 export const MAX_FILES_PER_UPLOAD = 50;
 

@@ -238,7 +238,7 @@ export function NotificationsPanel({
                 </AnimatePresence>
               </ul>
             ) : (
-              <CaughtUp title={tab === "inbox" ? "You're all caught up" : "No notifications yet"}>
+              <CaughtUp art="envelope" title={tab === "inbox" ? "You're all caught up" : "No notifications yet"}>
                 {tab === "inbox" ? "New approvals, comments and messages will appear here." : null}
               </CaughtUp>
             )}

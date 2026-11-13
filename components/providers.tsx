@@ -3,6 +3,7 @@
 import { Suspense, type ReactNode } from "react";
 import { NavProgress } from "@/components/nav-progress";
 import { CookieConsent } from "@/components/cookie-consent";
+import { TiltLayer } from "@/components/tilt-layer";
 import { ArrivalProvider } from "@/components/arrival/arrival";
 import { MotionConfig } from "motion/react";
 import { Tooltip } from "radix-ui";
@@ -19,6 +20,7 @@ export function Providers({ children }: { children: ReactNode }) {
         {/* The welcome animation after sign-in sits above every page. */}
         <ArrivalProvider>{children}</ArrivalProvider>
         <CookieConsent />
+        <TiltLayer />
         <Toaster
           position="top-center"
           richColors

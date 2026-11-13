@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { discardUploads, signChatAttachments } from "@/app/actions/files";
 import {
   useEffect,
@@ -14,7 +15,8 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { AlertDialog, DropdownMenu, Popover } from "radix-ui";
 import type { RealtimeChannel } from "@supabase/supabase-js";
-import { ArrowDown, Copy, CornerUpLeft, Lock, Pencil, SmilePlus, MessagesSquare, MoreHorizontal, RotateCw, Trash2, UploadCloud, X } from "lucide-react";
+import { ArrowDown, Copy, CornerUpLeft, Lock, Pencil, UserRound, SmilePlus, MessagesSquare, MoreHorizontal, RotateCw, Trash2, UploadCloud, Volume2, VolumeX, X } from "lucide-react";
+import { useMessageSound } from "@/lib/message-sound";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { deleteMessage, editMessage, sendMessage, toggleReaction, type SendResult } from "@/app/actions/chat";
@@ -41,7 +43,16 @@ import type { MentionedPerson } from "./mention-profile";
 
 type Row = ChatMessage & { pending?: boolean; failed?: string };
 /** A reply's quote. "loaded" means the original is on screen, so the quote can jump to it. */
-type Quote = { id: string; name: string; text: string; loaded: boolean };
+type Quote = {
+  id: string;
+  name: string;
+  text: string;
+  loaded: boolean;
+  /** Set when the quoted message is in another conversation (a private reply quoting the client chat). */
+  from?: string;
+  /** Opens the quoted message where it lives. */
+  href?: string;
+};
 
 /** One line standing in for a message: its text, or what it attached. */
 function messagePreview(m: ChatMessage): string {
@@ -132,14 +143,18 @@ export function ChatRoom({
   channel,
   viewer,
   initial,
-  otherUnread: initialOtherUnread,
+  channels,
+  unread: initialUnread,
   serverToday,
 }: {
   workspace: { id: string; slug: string; name: string; timeZone: string };
   channel: ChatChannel;
   viewer: { id: string; name: string; isAgency: boolean; isAdmin: boolean };
   initial: ChatData;
-  otherUnread: number;
+  /** The conversations this person can switch between, in tab order. */
+  channels: ChatChannel[];
+  /** Unread messages in the other conversations. */
+  unread: Partial<Record<ChatChannel, number>>;
   serverToday: string;
 }) {
   const [rows, setRows] = useState<Row[]>(initial.messages);
@@ -150,7 +165,7 @@ export function ChatRoom({
   const [typing, setTyping] = useState<Record<string, number>>({});
   const [online, setOnline] = useState<string[]>([]);
   const [newBelow, setNewBelow] = useState(0);
-  const [otherUnread, setOtherUnread] = useState(initialOtherUnread);
+  const [unread, setUnread] = useState(initialUnread);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [confirming, setConfirming] = useState<Row | null>(null);
@@ -158,6 +173,13 @@ export function ChatRoom({
   const [replyingTo, setReplyingTo] = useState<Row | null>(null);
   // Replied-to messages that are older than what's loaded, fetched for their quote.
   const [quoted, setQuoted] = useState<Record<string, ChatMessage | null>>({});
+  // Which conversation each fetched quote lives in (a private reply quotes the client chat).
+  const [quotedChannel, setQuotedChannel] = useState<Record<string, ChatChannel>>({});
+  // True when the message being replied to is from the client chat ("Reply privately").
+  const [privateReply, setPrivateReply] = useState(false);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [flash, setFlash] = useState<string | null>(null);
   // Messages that were already there (first load, earlier pages) appear without animation.
   const [quiet, setQuiet] = useState(() => new Set(initial.messages.map((m) => m.id)));
@@ -192,10 +214,15 @@ export function ChatRoom({
   }, [rows]);
 
   const isTeam = channel === "team";
+  const isDirect = channel === "direct";
   const entries = useMemo(() => buildEntries(rows, tz, today, unreadFrom), [rows, tz, today, unreadFrom]);
   const participants = initial.participants.map((id) => people[id]).filter((p): p is ChatPerson => Boolean(p));
   const others = participants.filter((p) => p.id !== viewer.id);
   const onlineOthers = others.filter((p) => online.includes(p.id));
+  // Everyone else who is typing right now, for the bubbles at the bottom of the conversation.
+  const typingPeople = Object.keys(typing)
+    .filter((id) => id !== viewer.id)
+    .map((id) => ({ id, name: people[id]?.name ?? "Someone", avatar: people[id]?.avatar ?? null }));
   const typingNames = Object.keys(typing)
     .filter((id) => id !== viewer.id)
     .map((id) => firstName(people[id]?.name ?? "Someone"));
@@ -280,9 +307,10 @@ export function ChatRoom({
     const ids = wantedQuotes.split(",");
     let cancelled = false;
     void (async () => {
-      const { data } = await createClient().from("messages").select(MESSAGE_COLUMNS).in("id", ids);
+      const { data } = await createClient().from("messages").select(`${MESSAGE_COLUMNS}, channel`).in("id", ids);
       if (cancelled) return;
       const found = (data ?? []).map(toChatMessage);
+      setQuotedChannel((current) => ({ ...current, ...Object.fromEntries((data ?? []).map((m) => [m.id, m.channel])) }));
       // Ones that don't come back are gone (or not ours to see): remembered as null.
       setQuoted((current) => ({ ...current, ...Object.fromEntries(ids.map((id) => [id, found.find((m) => m.id === id) ?? null])) }));
       void ensurePeople(found.map((m) => m.author_id));
@@ -292,6 +320,53 @@ export function ChatRoom({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the ids still missing
   }, [wantedQuotes]);
+
+  // "Reply privately": the Direct chat opens with ?reply=<client chat message>, quoted above the message box.
+  const replyParam = channel === "direct" ? searchParams.get("reply") : null;
+  useEffect(() => {
+    if (!replyParam) return;
+    let cancelled = false;
+    void (async () => {
+      const { data } = await createClient()
+        .from("messages")
+        .select(MESSAGE_COLUMNS)
+        .eq("id", replyParam)
+        .eq("workspace_id", workspace.id)
+        .eq("channel", "client")
+        .maybeSingle();
+      if (cancelled) return;
+      if (!data || data.deleted_at) {
+        toast.error("That message isn't available any more.");
+      } else {
+        const message = toChatMessage(data);
+        setQuoted((current) => ({ ...current, [message.id]: message }));
+        setQuotedChannel((current) => ({ ...current, [message.id]: "client" }));
+        setReplyingTo(message);
+        setPrivateReply(true);
+        void ensurePeople([message.author_id]);
+        composer.current?.focus();
+      }
+      // Drop ?reply= so a refresh doesn't start the reply again.
+      router.replace(pathname, { scroll: false });
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per private reply
+  }, [replyParam]);
+
+  // A private reply's quote links back here with ?m=<message>: scroll to it and highlight it.
+  const jumpParam = channel === "client" ? searchParams.get("m") : null;
+  useEffect(() => {
+    if (!jumpParam) return;
+    const timer = window.setTimeout(() => {
+      if (list.current?.querySelector(`[data-message="${jumpParam}"]`)) jumpTo(jumpParam);
+      else toast("That message is further back in the chat.");
+      router.replace(pathname, { scroll: false });
+    }, 300);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per link
+  }, [jumpParam]);
 
   async function ensureSigned(files: ChatAttachment[]) {
     const missing = [...new Set(files.map((f) => f.path).filter((p) => !signed[p]))];
@@ -304,7 +379,7 @@ export function ChatRoom({
     const rowChannel = raw.channel as ChatChannel;
     const authorId = (raw.author_id as string | null) ?? null;
     if (rowChannel !== channel) {
-      if (event === "INSERT" && authorId !== viewer.id) setOtherUnread((n) => n + 1);
+      if (event === "INSERT" && authorId !== viewer.id && channels.includes(rowChannel)) setUnread((u) => ({ ...u, [rowChannel]: (u[rowChannel] ?? 0) + 1 }));
       return;
     }
     const message = toChatMessage(raw as Parameters<typeof toChatMessage>[0]);
@@ -327,6 +402,8 @@ export function ChatRoom({
   });
 
   const receiveRead = useEffectEvent((raw: Record<string, unknown>) => {
+    // Read receipts are for the agency only (clients don't receive them anyway).
+    if (!viewer.isAgency) return;
     if (raw.channel !== channel || raw.user_id === viewer.id || typeof raw.user_id !== "string") return;
     setReaders((current) => ({ ...current, [raw.user_id as string]: String(raw.last_read_at) }));
   });
@@ -488,6 +565,7 @@ export function ChatRoom({
       pending: true,
     };
     setReplyingTo(null);
+    setPrivateReply(false);
     if (Object.keys(previews).length) setSigned((current) => ({ ...current, ...previews }));
     nearBottom.current = true;
     setNewBelow(0);
@@ -527,7 +605,14 @@ export function ChatRoom({
     if (target === undefined) return { id: row.reply_to, name: "", text: "Loading…", loaded: false };
     if (target === null || target.deleted_at) return { id: row.reply_to, name: "", text: "Message deleted", loaded: false };
     const author = target.author_id === viewer.id ? "You" : ((target.author_id && people[target.author_id]?.name) || "Former member");
-    return { id: target.id, name: author, text: messagePreview(target), loaded: rows.some((r) => r.id === target.id) };
+    const quote: Quote = { id: target.id, name: author, text: messagePreview(target), loaded: rows.some((r) => r.id === target.id) };
+    // Quoted from the client chat (a private reply): links there instead of jumping within this chat.
+    const home = quotedChannel[target.id];
+    if (home && home !== channel) {
+      quote.from = "Client chat";
+      quote.href = `/w/${workspace.slug}/chat?m=${target.id}`;
+    }
+    return quote;
   }
 
   /** Scrolls to a quoted message and highlights it briefly. */
@@ -576,7 +661,14 @@ export function ChatRoom({
 
   function startReply(row: Row) {
     setReplyingTo(row);
+    setPrivateReply(false);
     composer.current?.focus();
+  }
+
+  // Admins and the client can take a client chat message into their private Direct chat.
+  const canReplyPrivately = channel === "client" && channels.includes("direct");
+  function replyPrivately(row: Row) {
+    router.push(`/w/${workspace.slug}/chat/direct?reply=${row.id}`);
   }
 
   async function loadOlder() {
@@ -643,40 +735,58 @@ export function ChatRoom({
   // Copy
   // ---------------------------------------------------------------------------
   const clientNames = participants.filter((p) => p.side === "client").map((p) => firstName(p.name));
-  const title = isTeam ? "Team only" : viewer.isAgency ? workspace.name : "Your agency team";
+  const title = isTeam ? "Team only" : isDirect ? (viewer.isAgency ? `${workspace.name} · Direct` : "Direct with the agency admin") : viewer.isAgency ? workspace.name : "Your agency team";
   const subtitle = typingNames.length
     ? null
     : onlineOthers.length
       ? `${joinNames(onlineOthers.map((p) => firstName(p.name)))} ${onlineOthers.length === 1 ? "is" : "are"} here now`
       : isTeam
         ? `Private to the agency. ${workspace.name} can't see this.`
-        : viewer.isAgency
+        : isDirect
+          ? viewer.isAgency
+            ? `Only admins and ${clientNames.length ? joinNames(clientNames) : "the client"} see this. Your team doesn't.`
+            : "Only you and the agency's admins see this, not the rest of the team."
+          : viewer.isAgency
           ? clientNames.length
             ? `With ${joinNames(clientNames)} and your team`
             : "No one from the client has joined yet"
           : `Everyone in ${workspace.name} and the agency team can read this`;
 
-  const placeholder = isTeam ? "Message the team (the client can't see this)" : viewer.isAgency ? `Message ${workspace.name}` : "Message the team";
+  const placeholder = isTeam
+    ? "Message the team (the client can't see this)"
+    : isDirect
+      ? viewer.isAgency
+        ? `Message ${workspace.name} directly (your team can't see this)`
+        : "Message the admin directly"
+      : viewer.isAgency
+        ? `Message ${workspace.name}`
+        : "Message the team";
 
-  const last = rows.at(-1);
-  const seenBy =
-    last && last.author_id === viewer.id && !last.pending && !last.failed && !last.deleted_at
-      ? Object.entries(readers)
-          .filter(([id, at]) => id !== viewer.id && Date.parse(at) >= Date.parse(last.created_at))
-          .map(([id]) => people[id]?.name)
-          .filter((n): n is string => Boolean(n))
-          .map(firstName)
-      : [];
+  // Read status, for the agency only (clients never see who read what). It sits
+  // under the viewer's own latest message, wherever that is in the conversation:
+  // "Seen by Maya and Sam", or "Not seen yet" until someone else opens the chat.
+  const lastMine = viewer.isAgency ? rows.findLast((r) => r.author_id === viewer.id && !r.pending && !r.failed && !r.deleted_at) : undefined;
+  const seenBy = lastMine
+    ? Object.entries(readers)
+        .filter(([id, at]) => id !== viewer.id && Date.parse(at) >= Date.parse(lastMine.created_at))
+        .map(([id]) => people[id]?.name)
+        .filter((n): n is string => Boolean(n))
+        .map(firstName)
+    : [];
+  const receipt = lastMine ? (seenBy.length ? `Seen by ${joinNames(seenBy)}` : "Not seen yet") : null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">Chat</h1>
-        {viewer.isAgency ? (
+        <div className="flex min-w-0 items-center gap-1">
+          <h1 className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">Chat</h1>
+          <SoundToggle />
+        </div>
+        {channels.length > 1 ? (
           <nav className="inline-flex shrink-0 rounded-xl bg-sunken p-1" aria-label="Conversations">
-            {(["client", "team"] as const).map((c) => {
+            {channels.map((c) => {
               const active = c === channel;
-              const count = active ? 0 : otherUnread;
+              const count = active ? 0 : (unread[c] ?? 0);
               return (
                 <Link
                   key={c}
@@ -687,8 +797,8 @@ export function ChatRoom({
                     active ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink",
                   )}
                 >
-                  {c === "team" ? <Lock className="size-3.5" aria-hidden /> : null}
-                  {c === "team" ? "Team only" : "Client chat"}
+                  {c === "team" ? <Lock className="size-3.5" aria-hidden /> : c === "direct" ? <UserRound className="size-3.5" aria-hidden /> : null}
+                  {c === "team" ? "Team only" : c === "direct" ? "Direct" : viewer.isAgency ? "Client chat" : "Team chat"}
                   {count ? (
                     <span className="min-w-[18px] rounded-full bg-accent px-1 text-center text-[10px] leading-[18px] font-semibold text-white tabular-nums">
                       {count > 9 ? "9+" : count}
@@ -702,7 +812,7 @@ export function ChatRoom({
       </div>
 
       <section
-        aria-label={isTeam ? "Team-only chat" : "Chat"}
+        aria-label={isTeam ? "Team-only chat" : isDirect ? "Direct chat" : "Chat"}
         className={cn(
           "relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-surface",
           isTeam ? "border-violet-200" : "border-line",
@@ -783,6 +893,9 @@ export function ChatRoom({
                   quote={quoteFor(entry.row)}
                   highlighted={flash === entry.row.id}
                   onReply={() => startReply(entry.row)}
+                  onReplyPrivately={
+                    canReplyPrivately && entry.row.author_id && entry.row.author_id !== viewer.id ? () => replyPrivately(entry.row) : undefined
+                  }
                   viewerId={viewer.id}
                   nameOf={(id) => (id === viewer.id ? "You" : (people[id]?.name ?? "Former member"))}
                   onReact={(emoji) => void react(entry.row, emoji)}
@@ -790,18 +903,40 @@ export function ChatRoom({
                   onMediaLoad={keepPinned}
                   onDelete={() => setConfirming(entry.row)}
                   onEdit={(text) => saveEdit(entry.row, text)}
+                  receipt={lastMine?.id === entry.row.id ? receipt : null}
                   onRetry={() => retry(entry.row)}
                   onDiscard={() => discard(entry.row)}
                 />
               );
             })
           ) : (
-            <EmptyChat isTeam={isTeam} isAgency={viewer.isAgency} workspaceName={workspace.name} />
+            <EmptyChat isTeam={isTeam} isDirect={isDirect} isAgency={viewer.isAgency} workspaceName={workspace.name} />
           )}
 
-          {seenBy.length ? (
-            <p className="mt-1 px-1 text-right text-[11px] text-faint">Seen by {joinNames(seenBy)}</p>
-          ) : null}
+          {/* Someone is typing: a bubble with moving dots, where their message will appear. */}
+          <AnimatePresence initial={false}>
+            {typingPeople.map((p) => (
+              <motion.div
+                key={p.id}
+                initial={{ opacity: 0, y: 8, height: 0 }}
+                animate={{ opacity: 1, y: 0, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.18 }}
+                className="flex items-end gap-2 overflow-hidden"
+                data-typing={p.id}
+              >
+                <div className="w-8 shrink-0 pt-3">
+                  <Avatar name={p.name} src={p.avatar} />
+                </div>
+                <div className="mt-3">
+                  <p className="mb-1 px-1 text-xs font-semibold text-ink">{p.name}</p>
+                  <div className="inline-flex h-9 items-center rounded-2xl bg-sunken px-4 text-muted" role="status" aria-label={`${p.name} is typing`}>
+                    <TypingDots large />
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+          </AnimatePresence>
         </div>
 
         <AnimatePresence>
@@ -822,14 +957,24 @@ export function ChatRoom({
 
         {replyingTo ? (
           <div className="mx-3 mb-1 flex items-center gap-2 rounded-xl border-l-[3px] border-accent bg-sunken px-3 py-2 sm:mx-5">
-            <CornerUpLeft className="size-4 shrink-0 text-accent" aria-hidden />
+            {privateReply ? <Lock className="size-4 shrink-0 text-accent" aria-hidden /> : <CornerUpLeft className="size-4 shrink-0 text-accent" aria-hidden />}
             <p className="min-w-0 flex-1 text-[13px]">
               <span className="font-semibold text-ink">
-                Replying to {replyingTo.author_id === viewer.id ? "yourself" : ((replyingTo.author_id && people[replyingTo.author_id]?.name) || "Former member")}
+                Replying {privateReply ? "privately " : ""}to{" "}
+                {replyingTo.author_id === viewer.id ? "yourself" : ((replyingTo.author_id && people[replyingTo.author_id]?.name) || "Former member")}
               </span>
+              {privateReply ? <span className="text-muted"> · from the client chat</span> : null}
               <span className="block truncate text-muted">{messagePreview(replyingTo)}</span>
             </p>
-            <button type="button" onClick={() => setReplyingTo(null)} className="rounded-md p-1 text-muted hover:bg-surface hover:text-ink" aria-label="Cancel reply">
+            <button
+              type="button"
+              onClick={() => {
+                setReplyingTo(null);
+                setPrivateReply(false);
+              }}
+              className="rounded-md p-1 text-muted hover:bg-surface hover:text-ink"
+              aria-label="Cancel reply"
+            >
               <X className="size-4" aria-hidden />
             </button>
           </div>
@@ -888,6 +1033,7 @@ function MessageRow({
   quote,
   highlighted,
   onReply,
+  onReplyPrivately,
   onJump,
   viewerId,
   nameOf,
@@ -895,6 +1041,7 @@ function MessageRow({
   onMediaLoad,
   onDelete,
   onEdit,
+  receipt,
   onRetry,
   onDiscard,
 }: {
@@ -903,6 +1050,8 @@ function MessageRow({
   /** Briefly true after someone jumps here from a reply's quote. */
   highlighted: boolean;
   onReply: () => void;
+  /** Takes this client chat message into the private Direct chat (admins and the client only). */
+  onReplyPrivately?: () => void;
   onJump: (id: string) => void;
   viewerId: string;
   nameOf: (id: string) => string;
@@ -921,6 +1070,8 @@ function MessageRow({
   onDelete: () => void;
   /** Saves new text for the viewer's own message; resolves to false if it couldn't be saved. */
   onEdit: (text: string) => Promise<boolean>;
+  /** "Seen by …" or "Not seen yet", on the viewer's latest message (agency only). */
+  receipt?: string | null;
   onRetry: () => void;
   onDiscard: () => void;
 }) {
@@ -999,6 +1150,14 @@ function MessageRow({
             >
               <CornerUpLeft className="size-4" aria-hidden /> Reply
             </DropdownMenu.Item>
+            {onReplyPrivately ? (
+              <DropdownMenu.Item
+                className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-ink-soft outline-none data-[highlighted]:bg-sunken data-[highlighted]:text-ink"
+                onSelect={onReplyPrivately}
+              >
+                <Lock className="size-4" aria-hidden /> Reply privately
+              </DropdownMenu.Item>
+            ) : null}
             {mine ? (
               <DropdownMenu.Item
                 className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-ink-soft outline-none data-[highlighted]:bg-sunken data-[highlighted]:text-ink"
@@ -1057,7 +1216,20 @@ function MessageRow({
     </div>
   ) : null;
 
-  const quoteCard = quote && !deleted ? (
+  const quoteCard = quote && !deleted && quote.href ? (
+    // Quoted from the client chat: opens the original there.
+    <Link
+      href={quote.href}
+      className="mb-0.5 block max-w-full rounded-xl border-l-[3px] border-accent/70 bg-sunken/70 px-2.5 py-1.5 text-left text-xs hover:bg-sunken"
+      aria-label={`In reply to ${quote.name} in the ${quote.from?.toLowerCase()}: ${quote.text}`}
+    >
+      <span className="flex items-center gap-1 font-semibold text-ink-soft">
+        <Lock className="size-3 shrink-0 text-faint" aria-hidden />
+        {quote.name} · {quote.from}
+      </span>
+      <span className="line-clamp-2 break-words text-muted">{quote.text}</span>
+    </Link>
+  ) : quote && !deleted ? (
     <button
       type="button"
       onClick={() => quote.loaded && onJump(quote.id)}
@@ -1165,8 +1337,11 @@ function MessageRow({
               <X className="size-3" aria-hidden /> Remove
             </button>
           </div>
-        ) : mine && (last || row.pending) ? (
-          <p className="mt-1 px-1 text-[11px] text-faint">{row.pending ? "Sending…" : time}</p>
+        ) : mine && (last || row.pending || receipt) ? (
+          <p className="mt-1 px-1 text-right text-[11px] text-faint" data-receipt={receipt ? "" : undefined}>
+            {row.pending ? "Sending…" : time}
+            {receipt && !row.pending ? <span className={receipt.startsWith("Seen") ? "text-muted" : undefined}> · {receipt}</span> : null}
+          </p>
         ) : null}
       </div>
     </motion.div>
@@ -1196,20 +1371,42 @@ function PeopleStack({ people, online, viewerId }: { people: ChatPerson[]; onlin
   );
 }
 
-function EmptyChat({ isTeam, isAgency, workspaceName }: { isTeam: boolean; isAgency: boolean; workspaceName: string }) {
+function EmptyChat({ isTeam, isDirect, isAgency, workspaceName }: { isTeam: boolean; isDirect: boolean; isAgency: boolean; workspaceName: string }) {
   return (
     <div className="flex h-full min-h-60 flex-col items-center justify-center px-6 py-10 text-center">
       <span className={cn("flex size-14 items-center justify-center rounded-2xl", isTeam ? "bg-violet-100 text-violet-700" : "bg-accent-soft text-accent")}>
         {isTeam ? <Lock className="size-6" aria-hidden /> : <MessagesSquare className="size-6" aria-hidden />}
       </span>
-      <p className="mt-4 text-[15px] font-semibold text-ink">{isTeam ? "Talk about this client privately" : "Start the conversation"}</p>
+      <p className="mt-4 text-[15px] font-semibold text-ink">{isTeam ? "Talk about this client privately" : isDirect ? "A private line" : "Start the conversation"}</p>
       <p className="mt-1 max-w-sm text-sm text-muted">
         {isTeam
           ? `Only your agency team sees these messages. ${workspaceName} never does.`
-          : isAgency
+          : isDirect
+            ? isAgency
+              ? `Only agency admins and ${workspaceName} see these messages. Team members don't.`
+              : "Only you and the agency's admins see these messages. Use it for anything you'd rather not share with the whole team."
+            : isAgency
             ? `Messages here go to everyone at ${workspaceName} who uses the portal, and to your team.`
             : "Ask a question, share an idea or send photos. Everyone on the agency team working with you will see it."}
       </p>
     </div>
+  );
+}
+
+/** Turns the new-message chime on or off for this device. */
+function SoundToggle() {
+  const [on, setOn] = useMessageSound();
+  const label = on ? "Message sound on. Tap to mute" : "Message sound off. Tap to turn on";
+  return (
+    <button
+      type="button"
+      onClick={() => setOn(!on)}
+      aria-pressed={on}
+      aria-label={label}
+      title={label}
+      className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-sunken hover:text-ink"
+    >
+      {on ? <Volume2 className="size-[18px]" aria-hidden /> : <VolumeX className="size-[18px]" aria-hidden />}
+    </button>
   );
 }

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { CalendarClock, ChevronLeft, ChevronRight, EyeOff, Plus } from "lucide-react";
 import { getWorkspaceAccess } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { getPeople, getPlanByMonth } from "@/lib/queries";
+import { getPeople, getPlanByMonth, getThumbnails } from "@/lib/queries";
 import { formatDay, isMonthParam, monthLabel, shiftMonth, timeAgo } from "@/lib/dates";
 import { asArray, asObject, type KeyDate, type Quotas } from "@/lib/types";
 import { Avatar, Badge, ButtonLink, Card } from "@/components/ui";
@@ -58,7 +58,7 @@ export default async function PlanPage({ params, searchParams }: PageProps<"/w/[
         {header}
         <Card>
           {can.managePlans ? (
-            <CaughtUp title={`No plan for ${monthLabel(month)} yet`}>
+            <CaughtUp art="calendar" title={`No plan for ${monthLabel(month)} yet`}>
               <ActionForm action={createPlan} className="mt-3">
                 <input type="hidden" name="workspace_id" value={workspace.id} />
                 <input type="hidden" name="month" value={month} />
@@ -68,7 +68,7 @@ export default async function PlanPage({ params, searchParams }: PageProps<"/w/[
               </ActionForm>
             </CaughtUp>
           ) : (
-            <CaughtUp title="This plan isn't ready yet">Your agency will share it here once it&apos;s ready.</CaughtUp>
+            <CaughtUp art="calendar" title="This plan isn't ready yet">Your agency will share it here once it&apos;s ready.</CaughtUp>
           )}
         </Card>
       </div>
@@ -85,7 +85,7 @@ export default async function PlanPage({ params, searchParams }: PageProps<"/w/[
   ]);
   const items = itemsRes.data ?? [];
   const updates = updatesRes.data ?? [];
-  const people = await getPeople(updates.map((u) => u.author_id));
+  const [people, thumbs] = await Promise.all([getPeople(updates.map((u) => u.author_id)), getThumbnails(items.map((i) => i.id))]);
   const keyDates = asArray<KeyDate>(plan.key_dates);
   // The month's posts by stage (published ones are counted under Progress).
   const stages = [
@@ -144,6 +144,7 @@ export default async function PlanPage({ params, searchParams }: PageProps<"/w/[
             basePath={base}
             view={view}
             viewHrefs={{ calendar: `${base}/plan/${month}`, list: `${base}/plan/${month}?view=list` }}
+            thumbs={thumbs}
           />
         </TabsContent>
 
@@ -266,7 +267,7 @@ export default async function PlanPage({ params, searchParams }: PageProps<"/w/[
                 })}
               </Stagger>
             ) : (
-              <CaughtUp title="No updates yet" />
+              <CaughtUp art="envelope" title="No updates yet" />
             )}
           </Card>
         </TabsContent>

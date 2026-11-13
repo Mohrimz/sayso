@@ -1,3 +1,4 @@
+import { avatarUrl } from "@/lib/avatar";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Lock, MessagesSquare, Paperclip } from "lucide-react";
@@ -17,6 +18,7 @@ type Thread = {
   key: string;
   slug: string;
   name: string;
+  logo: string | null;
   channel: ChatChannel;
   unread: number;
   lastAt: string | null;
@@ -34,17 +36,18 @@ export default async function InboxPage() {
   const people = await getPeople((summaries ?? []).map((s) => s.last_author));
 
   const threads: Thread[] = workspaces.flatMap((w) =>
-    (["client", "team"] as const)
+    (["client", "direct", "team"] as const)
       .map((channel): Thread | null => {
         const s = byKey.get(`${w.id}:${channel}`);
-        // Team chats only show up once someone has used them.
-        if (!s && channel === "team") return null;
+        // Team and direct chats only show up once someone has used them.
+        if (!s && channel !== "client") return null;
         const author = s?.last_author ? (s.last_author === viewer.id ? "You" : (people.get(s.last_author)?.name.split(" ")[0] ?? "Someone")) : null;
         const text = s ? (s.last_deleted ? "Message deleted" : s.last_body || (s.last_files ? (s.last_files === 1 ? "Sent a file" : `Sent ${s.last_files} files`) : "")) : null;
         return {
           key: `${w.id}:${channel}`,
           slug: w.slug,
           name: w.name,
+          logo: avatarUrl(w.logo_path),
           channel,
           unread: s?.unread ?? 0,
           lastAt: s?.last_at ?? null,
@@ -87,7 +90,7 @@ export default async function InboxPage() {
                   className={cn("flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-sunken sm:px-5", t.unread && "bg-accent-soft/40")}
                 >
                   <span className="relative shrink-0">
-                    <Avatar name={t.name} />
+                    <Avatar name={t.name} src={t.logo} />
                     {t.channel === "team" ? (
                       <span className="absolute -right-1 -bottom-1 flex size-4 items-center justify-center rounded-full bg-violet-600 text-white ring-2 ring-surface">
                         <Lock className="size-2.5" aria-hidden />
@@ -98,6 +101,7 @@ export default async function InboxPage() {
                     <span className="flex items-baseline gap-2">
                       <span className={cn("truncate text-sm text-ink", t.unread ? "font-semibold" : "font-medium")}>{t.name}</span>
                       {t.channel === "team" ? <span className="shrink-0 text-xs font-medium text-violet-700">Team only</span> : null}
+                      {t.channel === "direct" ? <span className="shrink-0 text-xs font-medium text-accent-ink">Direct</span> : null}
                       <span className="ml-auto shrink-0 text-xs text-faint">{t.lastAt ? timeAgo(t.lastAt) : ""}</span>
                     </span>
                     <span className={cn("mt-0.5 flex items-center gap-1 text-[13px]", t.unread ? "text-ink-soft" : "text-muted")}>

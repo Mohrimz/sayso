@@ -1,3 +1,4 @@
+import { avatarUrl } from "@/lib/avatar";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { CalendarClock, CircleCheckBig, Inbox, ListTodo, Plus, Send } from "lucide-react";
@@ -197,7 +198,7 @@ export default async function Dashboard() {
                 <StaggerItem as="li" key={w.id}>
                   <Link href={`/w/${w.slug}`} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3.5 transition-colors hover:bg-sunken sm:px-5">
                     <span className="flex min-w-0 flex-1 basis-48 items-center gap-3">
-                      <Avatar name={w.name} />
+                      <Avatar name={w.name} src={avatarUrl(w.logo_path)} />
                       <span className="min-w-0">
                         <span className="block truncate text-sm font-medium text-ink">{w.name}</span>
                         <span className="block text-xs text-muted">
@@ -226,7 +227,7 @@ export default async function Dashboard() {
             })}
           </Stagger>
         ) : (
-          <CaughtUp title="No clients yet">{isAdmin ? "Create the first client workspace to get started." : "Ask an admin to assign you to a client."}</CaughtUp>
+          <CaughtUp art="cards" title="No clients yet">{isAdmin ? "Create the first client workspace to get started." : "Ask an admin to assign you to a client."}</CaughtUp>
         )}
       </Card>
     </div>

@@ -4,6 +4,7 @@ import { useEffect, useEffectEvent, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { chatKey, type ChatChannel } from "@/lib/chat";
+import { playMessageSound, primeMessageSound } from "@/lib/message-sound";
 
 /**
  * Unread chat counts for the navigation badges, kept live.
@@ -28,9 +29,14 @@ export function useChatUnread(initial: Record<string, number>, viewerId: string,
   const onMessage = useEffectEvent((row: { workspace_id?: string; channel?: ChatChannel; author_id?: string | null }) => {
     if (!row.workspace_id || !row.channel || row.author_id === viewerId) return;
     const key = chatKey(row.workspace_id, row.channel);
+    // A chime for messages from people (not system notes); softer when that conversation is on screen.
+    if (row.author_id) playMessageSound({ quiet: key === viewing && document.visibilityState === "visible" });
     if (key === viewing) return;
     setState((s) => ({ ...s, counts: { ...s.counts, [key]: (s.counts[key] ?? 0) + 1 } }));
   });
+
+  // Browsers only allow sound after the first tap or key press on the page.
+  useEffect(() => primeMessageSound(), []);
 
   useEffect(() => {
     if (!viewerId) return;
@@ -58,8 +64,8 @@ export function useChatUnread(initial: Record<string, number>, viewerId: string,
 
 /** Which conversation a path shows, as a chatKey, or null. */
 export function viewingChat(pathname: string, workspaces: { id: string; slug: string }[]): string | null {
-  const match = /^\/w\/([^/]+)\/chat(\/team)?\/?$/.exec(pathname);
+  const match = /^\/w\/([^/]+)\/chat(?:\/(team|direct))?\/?$/.exec(pathname);
   if (!match) return null;
   const ws = workspaces.find((w) => w.slug === match[1]);
-  return ws ? chatKey(ws.id, match[2] ? "team" : "client") : null;
+  return ws ? chatKey(ws.id, (match[2] as ChatChannel | undefined) ?? "client") : null;
 }

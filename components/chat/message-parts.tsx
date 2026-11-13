@@ -93,7 +93,7 @@ async function saveFile(src: string, name: string) {
   }
 }
 
-function DownloadButton({ src, name, className }: { src: string; name: string; className?: string }) {
+export function DownloadButton({ src, name, className }: { src: string; name: string; className?: string }) {
   const [busy, setBusy] = useState(false);
   return (
     <button
@@ -115,7 +115,7 @@ function DownloadButton({ src, name, className }: { src: string; name: string; c
 }
 
 /** Full-size view of a message's photos, with download, and arrows when there are several. */
-function Lightbox({ images, start, onClose }: { images: { src: string; name: string }[]; start: number; onClose: () => void }) {
+export function Lightbox({ images, start, onClose }: { images: { src: string; name: string }[]; start: number; onClose: () => void }) {
   const [index, setIndex] = useState(start);
   const current = images[Math.min(index, images.length - 1)];
   const go = (to: number) => setIndex(Math.min(images.length - 1, Math.max(0, to)));
@@ -260,12 +260,16 @@ export function Attachments({
   );
 }
 
-/** Three bouncing dots for "is typing". */
-export function TypingDots() {
+/** Three bouncing dots for "is typing". `large` is the size used inside a chat bubble. */
+export function TypingDots({ large = false }: { large?: boolean }) {
   return (
-    <span className="inline-flex items-center gap-0.5" aria-hidden>
+    <span className={cn("inline-flex items-center", large ? "gap-1" : "gap-0.5")} aria-hidden>
       {[0, 1, 2].map((i) => (
-        <span key={i} className="size-1 animate-bounce rounded-full bg-current" style={{ animationDelay: `${i * 120}ms`, animationDuration: "900ms" }} />
+        <span
+          key={i}
+          className={cn("animate-bounce rounded-full bg-current motion-reduce:animate-pulse", large ? "size-2" : "size-1")}
+          style={{ animationDelay: `${i * 140}ms`, animationDuration: "900ms" }}
+        />
       ))}
     </span>
   );

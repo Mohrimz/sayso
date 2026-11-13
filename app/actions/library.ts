@@ -6,7 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { fileInfo, removeFiles, signedUrl } from "@/lib/files";
 import { findWorkspaceAccess } from "@/lib/auth";
 import { deliverNotificationsLater, done, fail, friendlyError, str } from "@/lib/action-helpers";
-import { cleanFolder, MAX_FILES_PER_UPLOAD } from "@/lib/library";
+import { cleanFolder, CLIENT_FOLDER, MAX_FILES_PER_UPLOAD } from "@/lib/library";
 import { isUuid } from "@/lib/chat";
 import type { ActionState } from "./types";
 
@@ -31,7 +31,8 @@ export async function recordUploads(workspaceId: string, folder: string, files: 
       workspace_id: workspaceId,
       path: f.path,
       name: String(f.name || "file").slice(0, 200),
-      folder: cleanFolder(folder),
+      // A client's files always go into their own folder.
+      folder: access.viewer.side === "client" ? CLIENT_FOLDER : cleanFolder(folder),
       mime: String(f.mime || "application/octet-stream").slice(0, 100),
       size: Math.max(0, Math.round(Number(f.size) || 0)),
       uploaded_by: access.viewer.id,

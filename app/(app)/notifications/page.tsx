@@ -66,7 +66,7 @@ export default async function NotificationsPage() {
             })}
           </Stagger>
         ) : (
-          <CaughtUp title="No notifications yet">Approvals, comments and new tasks will show up here.</CaughtUp>
+          <CaughtUp art="envelope" title="No notifications yet">Approvals, comments and new tasks will show up here.</CaughtUp>
         )}
       </Card>
     </div>

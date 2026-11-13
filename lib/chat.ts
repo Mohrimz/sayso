@@ -2,11 +2,18 @@
  * Chat types and helpers shared by the server and the browser.
  *
  * Each client workspace has a "client" conversation (the client and the
- * agency) and a "team" conversation (agency only). Files live in the private
+ * agency team), a "team" conversation (agency only) and a "direct" one
+ * (agency admins and the client only; team members can't see it). Files live in the private
  * chat-files bucket under <workspace>/<channel>/<upload id>/<file>.
  */
 
-export type ChatChannel = "client" | "team";
+export type ChatChannel = "client" | "team" | "direct";
+
+/** The conversations a person can open for a client, in tab order. */
+export function channelsFor(viewer: { isAgency: boolean; isAdmin: boolean }): ChatChannel[] {
+  if (!viewer.isAgency) return ["client", "direct"];
+  return viewer.isAdmin ? ["client", "direct", "team"] : ["client", "team"];
+}
 
 export type ChatAttachment = { path: string; name: string; mime: string; size: number };
 
@@ -55,11 +62,11 @@ export const MESSAGE_COLUMNS = "id, author_id, body, attachments, mentions, repl
 export const MAX_MENTIONS = 20;
 
 export function isChannel(value: unknown): value is ChatChannel {
-  return value === "client" || value === "team";
+  return value === "client" || value === "team" || value === "direct";
 }
 
 export function chatHref(slug: string, channel: ChatChannel = "client") {
-  return `/w/${slug}/chat${channel === "team" ? "/team" : ""}`;
+  return `/w/${slug}/chat${channel === "team" ? "/team" : channel === "direct" ? "/direct" : ""}`;
 }
 
 /** Key for unread counts: one per workspace and conversation. */

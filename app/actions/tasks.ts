@@ -90,21 +90,63 @@ export async function deleteTask(_: ActionState, fd: FormData): Promise<ActionSt
 
 export type SubmitTarget = { id: string; title: string; type: ContentType; plannedAt: string | null; status: string };
 
-/** Posts the work for a task can go on: this client's posts that are still being made. */
-export async function listSubmitTargets(taskId: string): Promise<SubmitTarget[]> {
+/**
+ * Posts the work can go on: the client's posts that are still being made. Pass
+ * the task, or (for work sent without a task) the client.
+ */
+export async function listSubmitTargets(by: { taskId?: string; workspaceId?: string }): Promise<SubmitTarget[]> {
   const viewer = await getViewer();
-  if (!viewer || viewer.side !== "agency" || !isUuid(taskId)) return [];
+  if (!viewer || viewer.side !== "agency") return [];
   const supabase = await createClient();
-  const { data: task } = await supabase.from("tasks").select("workspace_id").eq("id", taskId).maybeSingle();
-  if (!task) return [];
+  let workspaceId = by?.workspaceId;
+  if (by?.taskId) {
+    if (!isUuid(by.taskId)) return [];
+    const { data: task } = await supabase.from("tasks").select("workspace_id").eq("id", by.taskId).maybeSingle();
+    workspaceId = task?.workspace_id;
+  }
+  if (!workspaceId || !isUuid(workspaceId)) return [];
   const { data } = await supabase
     .from("content_items")
     .select("id, title, type, planned_at, status")
-    .eq("workspace_id", task.workspace_id)
+    .eq("workspace_id", workspaceId)
     .in("status", ["planned", "draft", "internal_review"])
     .order("planned_at", { ascending: true, nullsFirst: false })
     .limit(200);
   return (data ?? []).map((i) => ({ id: i.id, title: i.title, type: i.type, plannedAt: i.planned_at, status: i.status }));
+}
+
+/**
+ * Work a team member sends without a task on the board: it gets a task of its
+ * own, assigned to them and in progress, so it goes through the same review
+ * (submitTaskWork next, then the admin's Review).
+ */
+export async function startOwnWork(input: {
+  workspaceId: string;
+  title: string;
+}): Promise<{ ok: true; taskId: string } | { ok: false; error: string }> {
+  const viewer = await requireViewer();
+  if (viewer.side !== "agency" || !isUuid(input?.workspaceId)) return { ok: false, error: "Choose the client this work is for." };
+  const title = String(input.title ?? "")
+    .trim()
+    .slice(0, 200);
+  if (!title) return { ok: false, error: "Say what the work is." };
+  const access = await findWorkspaceAccess("id", input.workspaceId);
+  if (!access?.can.isAgency) return { ok: false, error: "You're not on this client's team." };
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("tasks")
+    .insert({
+      workspace_id: access.workspace.id,
+      title,
+      owner_side: "agency",
+      owner_id: viewer.id,
+      status: "in_progress",
+      created_by: viewer.id,
+    })
+    .select("id")
+    .single();
+  if (error || !data) return { ok: false, error: friendlyError(error) };
+  return { ok: true, taskId: data.id };
 }
 
 const POST_TYPES: ContentType[] = ["feed_post", "carousel", "reel", "story"];
@@ -114,12 +156,17 @@ const POST_TYPES: ContentType[] = ["feed_post", "carousel", "reel", "story"];
  * into the plan for its month (made as an internal draft plan if there isn't
  * one), assigned to the person doing the work, for Instagram and Facebook.
  */
-export async function createPostForTask(input: { taskId: string; title: string; type: string; date: string }): Promise<
-  { ok: true; post: SubmitTarget } | { ok: false; error: string }
-> {
+export async function createPostForTask(input: {
+  taskId: string;
+  title: string;
+  type: string;
+  date: string;
+}): Promise<{ ok: true; post: SubmitTarget } | { ok: false; error: string }> {
   const viewer = await requireViewer();
   if (viewer.side !== "agency" || !isUuid(input?.taskId)) return { ok: false, error: "Task not found." };
-  const title = String(input.title ?? "").trim().slice(0, 200);
+  const title = String(input.title ?? "")
+    .trim()
+    .slice(0, 200);
   if (!title) return { ok: false, error: "Give the post a title." };
   const type = POST_TYPES.includes(input.type as ContentType) ? (input.type as ContentType) : "feed_post";
   const date = /^\d{4}-\d{2}-\d{2}$/.test(String(input.date ?? "")) ? input.date : "";
@@ -245,7 +292,9 @@ export async function reviewTaskWork(input: { taskId: string; decision: "approve
   if (viewer.agencyRole !== "admin") return fail("Only an agency admin can review work.");
   if (!isUuid(input?.taskId)) return fail("Task not found.");
   if (input.decision !== "approved" && input.decision !== "changes_requested") return fail("Unknown decision.");
-  const note = String(input.note ?? "").trim().slice(0, 2000);
+  const note = String(input.note ?? "")
+    .trim()
+    .slice(0, 2000);
   if (input.decision === "changes_requested" && !note) return fail("Say what needs to change.");
 
   const supabase = await createClient();

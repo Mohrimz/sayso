@@ -21,7 +21,8 @@ export function permissionsFor(role: WorkspaceRole) {
     sharePlan: role === "admin",
     approve: role === "approver",
     comment: true,
-    uploadFiles: agency || role === "approver",
+    // Everyone can add files to the Library; a client's go into their own "From the client" folder.
+    uploadFiles: true,
     editBrandKit: agency || role === "approver",
     // Publishing (and "Mark as published") is for agency admins; team members request it.
     markPublished: role === "admin",

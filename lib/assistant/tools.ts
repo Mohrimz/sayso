@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { Database } from "@/lib/database.types";
 import { CONTENT_TYPES, deliverables, deliverableSummary, platformLabel, statusView } from "@/lib/content";
 import { currentMonth, formatDate, formatDateTime as formatBothZones, todayKey, zonedDayKey, zonedInputToIso } from "@/lib/dates";
+import { chatHref } from "@/lib/chat";
 import { asArray, asObject, type ContentStatus, type Faq, type KeyDate, type Quotas, type SocialAccount } from "@/lib/types";
 import { offerPreview, recentOfferSince } from "@/lib/offers";
 
@@ -273,10 +274,10 @@ async function dailyBriefing(input: z.infer<typeof DailyBriefing>, data: Assista
       const ws = wsById.get(t.workspace_id)!;
       return {
         client: ws.name,
-        chat: t.channel === "team" ? "team-only chat" : "client chat",
+        chat: t.channel === "team" ? "team-only chat" : t.channel === "direct" ? "direct chat (admins and the client only)" : "client chat",
         unread: t.unread,
         last_message: t.last_deleted ? "(deleted)" : snippet(t.last_body, 160),
-        link: t.channel === "team" ? `/w/${ws.slug}/chat/team` : `/w/${ws.slug}/chat`,
+        link: chatHref(ws.slug, t.channel),
       };
     });
 
@@ -728,10 +729,10 @@ async function recentActivity(input: z.infer<typeof RecentActivity>, data: Assis
     events.push({
       at: m.created_at,
       client: ws(m.workspace_id).name,
-      what: m.channel === "team" ? "Team-only chat message" : "Client chat message",
+      what: m.channel === "team" ? "Team-only chat message" : m.channel === "direct" ? "Direct chat message" : "Client chat message",
       by: data.personName(m.author_id),
       text: snippet(m.body) || (files ? `Sent ${files} file${files === 1 ? "" : "s"}` : undefined),
-      link: m.channel === "team" ? `/w/${ws(m.workspace_id).slug}/chat/team` : `/w/${ws(m.workspace_id).slug}/chat`,
+      link: chatHref(ws(m.workspace_id).slug, m.channel),
     });
   }
   for (const u of updates.data ?? []) {

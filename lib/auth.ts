@@ -131,7 +131,7 @@ export const getMyWorkspaces = cache(async () => {
   const supabase = await createClient();
   const { data } = await supabase
     .from("workspaces")
-    .select("id, slug, name, status")
+    .select("id, slug, name, status, logo_path")
     .neq("status", "archived")
     .order("name");
   return data ?? [];

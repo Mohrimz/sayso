@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { Lock } from "lucide-react";
-import { Badge } from "@/components/ui";
+import { Badge, buttonClass } from "@/components/ui";
 import { TaskCheck, TaskDelete, TaskStatusSelect } from "@/components/task-controls";
-import { ReviewWork, SubmitWork } from "@/components/task-work";
+import { ReviewWork, SubmitWork, ViewWork } from "@/components/task-work";
 import { formatDate, todayKey } from "@/lib/dates";
 import type { Task, TaskStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,8 @@ export type TaskView = Task & {
   workspaceSlug?: string;
   /** The latest review of submitted work, if any. */
   lastReview?: { decision: string | null; note: string | null } | null;
+  /** Approved work on a post: whether it has gone to the client, and who sends it. */
+  sentStatus?: { href: string; senderId: string | null; sent: boolean } | null;
 };
 
 /** Who is looking: drives which actions each task offers. */
@@ -60,10 +62,15 @@ export function TaskList({
         const canReview = viewer.isAdmin && agencyTask && t.status === "in_review";
         const waiting = viewer.isAgency && !viewer.isAdmin && agencyTask && t.status === "in_review";
         const changes = viewer.isAgency && t.status === "in_progress" && t.lastReview?.decision === "changes_requested" ? t.lastReview.note : null;
+        // Anyone on the team can look at work that was sent for a task (admins use Review while it's waiting).
+        const canView = viewer.isAgency && agencyTask && !canReview && (t.status === "in_review" || Boolean(t.lastReview));
         const tickable = canTick(t) && t.status !== "in_review";
         // Only admins delete tasks.
         const canDelete = canEdit && viewer.isAdmin;
-        const hasActions = options.length > 0 || canSubmit || canReview || waiting || canDelete;
+        // Approved work goes to the client from the person who made it; everyone else sees whether it has.
+        const sent = viewer.isAgency && agencyTask ? (t.sentStatus ?? null) : null;
+        const canSend = Boolean(sent && !sent.sent && sent.senderId === viewer.id);
+        const hasActions = options.length > 0 || canSubmit || canReview || canView || canSend || waiting || canDelete;
 
         return (
           <li key={t.id} className="flex items-start gap-3 px-4 py-3 sm:px-5">
@@ -92,6 +99,7 @@ export function TaskList({
                   </Badge>
                 ) : null}
                 {t.status === "in_progress" ? <Badge tone="amber">In progress</Badge> : null}
+                {sent ? sent.sent ? <Badge tone="green">Sent to client</Badge> : <Badge tone="orange">Not sent to client yet</Badge> : null}
                 {t.status === "in_review" ? (
                   viewer.isAdmin ? (
                     <Badge tone="blue">Submitted</Badge>
@@ -114,6 +122,12 @@ export function TaskList({
                   {options.length ? <TaskStatusSelect key={t.status} taskId={t.id} status={t.status} options={options} /> : null}
                   {canSubmit ? <SubmitWork taskId={t.id} workspaceId={t.workspace_id} title={t.title} postId={t.content_item_id} /> : null}
                   {canReview ? <ReviewWork taskId={t.id} title={t.title} defaultOpen={reviewId === t.id} /> : null}
+                  {canSend && sent ? (
+                    <Link href={sent.href} className={buttonClass("primary", "sm")}>
+                      Send to client
+                    </Link>
+                  ) : null}
+                  {canView ? <ViewWork taskId={t.id} title={t.title} /> : null}
                   {waiting ? <span className="text-xs text-muted">Waiting for review</span> : null}
                   {canDelete ? <TaskDelete taskId={t.id} /> : null}
                 </div>

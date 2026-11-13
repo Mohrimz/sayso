@@ -5,10 +5,18 @@ import { TypeIcon } from "@/components/type-icon";
 import { toneDot } from "@/components/ui";
 import { statusView } from "@/lib/content";
 import { formatDay, formatTime, monthGrid, todayKey, zonedDayKey } from "@/lib/dates";
+import type { SignedMedia } from "@/lib/media";
 import type { ContentItem, KeyDate } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type Item = Pick<ContentItem, "id" | "title" | "type" | "status" | "client_decision" | "planned_at">;
+type Thumbs = Map<string, SignedMedia>;
+
+/** The post's first photo, if it has one (videos aren't loaded just for a preview). */
+function photoOf(thumbs: Thumbs | undefined, id: string) {
+  const media = thumbs?.get(id);
+  return media?.kind === "image" ? media.src : null;
+}
 
 function groupByDay(items: Item[], tz: string) {
   const map = new Map<string, Item[]>();
@@ -38,6 +46,7 @@ export function Timeline({
   basePath,
   view,
   viewHrefs,
+  thumbs,
 }: {
   month: string;
   items: Item[];
@@ -47,6 +56,8 @@ export function Timeline({
   basePath: string;
   view: "calendar" | "list";
   viewHrefs?: { calendar: string; list: string };
+  /** Each post's first file, for the picture previews. */
+  thumbs?: Thumbs;
 }) {
   const byDay = groupByDay(items, tz);
   const keyDatesByDay = new Map(keyDates.map((d) => [d.date, d.label]));
@@ -60,14 +71,20 @@ export function Timeline({
             <Link
               href={viewHrefs.calendar}
               scroll={false}
-              className={cn("inline-flex items-center gap-1.5 rounded-md px-2.5 py-1", view === "calendar" ? "bg-surface font-medium text-ink shadow-sm" : "text-muted")}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1",
+                view === "calendar" ? "bg-surface font-medium text-ink shadow-sm" : "text-muted",
+              )}
             >
               <CalendarDays className="size-3.5" aria-hidden /> Calendar
             </Link>
             <Link
               href={viewHrefs.list}
               scroll={false}
-              className={cn("inline-flex items-center gap-1.5 rounded-md px-2.5 py-1", view === "list" ? "bg-surface font-medium text-ink shadow-sm" : "text-muted")}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1",
+                view === "list" ? "bg-surface font-medium text-ink shadow-sm" : "text-muted",
+              )}
             >
               <List className="size-3.5" aria-hidden /> List
             </Link>
@@ -77,11 +94,11 @@ export function Timeline({
 
       {view === "calendar" ? (
         <div className="hidden md:block">
-          <CalendarGrid month={month} byDay={byDay} keyDates={keyDatesByDay} today={today} side={side} basePath={basePath} />
+          <CalendarGrid month={month} byDay={byDay} keyDates={keyDatesByDay} today={today} side={side} basePath={basePath} thumbs={thumbs} />
         </div>
       ) : null}
       <div className={view === "calendar" ? "md:hidden" : undefined}>
-        <AgendaList byDay={byDay} keyDates={keyDatesByDay} today={today} side={side} basePath={basePath} tz={tz} />
+        <AgendaList byDay={byDay} keyDates={keyDatesByDay} today={today} side={side} basePath={basePath} tz={tz} thumbs={thumbs} />
       </div>
     </div>
   );
@@ -94,6 +111,7 @@ function CalendarGrid({
   today,
   side,
   basePath,
+  thumbs,
 }: {
   month: string;
   byDay: Map<string, Item[]>;
@@ -101,11 +119,13 @@ function CalendarGrid({
   today: string;
   side: "agency" | "client";
   basePath: string;
+  thumbs?: Thumbs;
 }) {
   const days = monthGrid(month);
   return (
-    <div className="overflow-hidden rounded-xl border border-line">
-      <div className="grid grid-cols-7 border-b border-line bg-sunken text-center text-xs font-medium text-muted">
+    // Not overflow-hidden: the picture previews rise above the grid.
+    <div className="rounded-xl border border-line">
+      <div className="grid grid-cols-7 rounded-t-xl border-b border-line bg-sunken text-center text-xs font-medium text-muted">
         {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
           <div key={d} className="py-2">
             {d}
@@ -123,6 +143,8 @@ function CalendarGrid({
                 "min-h-28 border-line p-1.5",
                 i % 7 !== 6 && "border-r",
                 i < days.length - 7 && "border-b",
+                i === days.length - 7 && "rounded-bl-xl",
+                i === days.length - 1 && "rounded-br-xl",
                 !day.inMonth && "bg-sunken/60",
               )}
             >
@@ -144,15 +166,35 @@ function CalendarGrid({
               <ul className="space-y-1">
                 {items.map((item) => {
                   const view = statusView(item, side);
+                  const photo = photoOf(thumbs, item.id);
                   return (
                     <li key={item.id}>
                       <Link
                         href={`${basePath}/content/${item.id}`}
-                        className="flex items-center gap-1.5 rounded-md border border-line bg-surface px-1.5 py-1 text-[11.5px] leading-tight text-ink hover:border-line-strong hover:shadow-sm"
-                        title={`${item.title} · ${view.label}`}
+                        className="group/chip relative flex items-center gap-1.5 rounded-md border border-line bg-surface px-1.5 py-1 text-[11.5px] leading-tight text-ink hover:z-30 hover:border-line-strong hover:shadow-sm focus-visible:z-30"
+                        title={photo ? undefined : `${item.title} · ${view.label}`}
                       >
                         <span className={cn("size-2 shrink-0 rounded-full", toneDot[view.tone])} aria-hidden />
                         <span className="truncate">{item.title}</span>
+                        {photo ? (
+                          <span
+                            aria-hidden
+                            className="print-card pointer-events-none absolute bottom-[calc(100%+8px)] left-1/2 -ml-[76px] block w-[152px] rounded-lg border border-line bg-surface p-1.5 shadow-[0_24px_40px_-18px_rgb(29_27_22/0.45)]"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element -- signed storage URL */}
+                            <img
+                              src={photo}
+                              alt=""
+                              loading="lazy"
+                              decoding="async"
+                              className="aspect-[4/5] w-full rounded-md bg-sunken object-cover"
+                            />
+                            <span className="mt-1.5 line-clamp-2 block px-0.5 text-[11.5px] leading-snug font-medium whitespace-normal text-ink">
+                              {item.title}
+                            </span>
+                            <span className="mb-0.5 block px-0.5 text-[10.5px] text-muted">{view.label}</span>
+                          </span>
+                        ) : null}
                       </Link>
                     </li>
                   );
@@ -173,6 +215,7 @@ function AgendaList({
   side,
   basePath,
   tz,
+  thumbs,
 }: {
   byDay: Map<string, Item[]>;
   keyDates: Map<string, string>;
@@ -180,6 +223,7 @@ function AgendaList({
   side: "agency" | "client";
   basePath: string;
   tz: string;
+  thumbs?: Thumbs;
 }) {
   const keys = [...new Set([...byDay.keys(), ...keyDates.keys()])].filter((k) => k !== "unscheduled").sort();
   if (byDay.has("unscheduled")) keys.push("unscheduled");
@@ -199,19 +243,30 @@ function AgendaList({
             ) : null}
           </div>
           <ul className="space-y-1">
-            {(byDay.get(key) ?? []).map((item) => (
-              <li key={item.id}>
-                <Link
-                  href={`${basePath}/content/${item.id}`}
-                  className="-mx-2 flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-sunken"
-                >
-                  <span className="shrink-0 text-xs tabular-nums text-muted">{timeOf(item.planned_at, tz)}</span>
-                  <TypeIcon type={item.type} className="text-muted" />
-                  <span className="line-clamp-2 min-w-0 flex-1 text-sm leading-snug text-ink">{item.title}</span>
-                  <StatusBadge item={item} side={side} />
-                </Link>
-              </li>
-            ))}
+            {(byDay.get(key) ?? []).map((item) => {
+              const photo = photoOf(thumbs, item.id);
+              return (
+                <li key={item.id}>
+                  <Link href={`${basePath}/content/${item.id}`} className="-mx-2 flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-sunken">
+                    <span className="shrink-0 text-xs tabular-nums text-muted">{timeOf(item.planned_at, tz)}</span>
+                    {photo ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- signed storage URL
+                      <img
+                        src={photo}
+                        alt=""
+                        loading="lazy"
+                        decoding="async"
+                        className="size-9 shrink-0 rounded-md border border-line bg-sunken object-cover shadow-[0_2px_6px_-2px_rgb(29_27_22/0.25)]"
+                      />
+                    ) : (
+                      <TypeIcon type={item.type} className="text-muted" />
+                    )}
+                    <span className="line-clamp-2 min-w-0 flex-1 text-sm leading-snug text-ink">{item.title}</span>
+                    <StatusBadge item={item} side={side} />
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
         </li>
       ))}

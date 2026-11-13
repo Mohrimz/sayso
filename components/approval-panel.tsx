@@ -1,23 +1,37 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { preload } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { CheckCircle2, MessageSquareWarning } from "lucide-react";
 import { toast } from "sonner";
 import { submitApproval } from "@/app/actions/content";
 import { FormMessage, SubmitButton } from "@/components/action-form";
-import { celebrate } from "@/components/anim";
+import { stampApproved } from "@/components/approved-seal";
 import { buttonClass } from "@/components/ui";
 import type { ActionState } from "@/app/actions/types";
 
 /** Approve / Request changes for client approvers. Request changes needs a comment. */
-export function ApprovalPanel({ itemId, deadlineLabel }: { itemId: string; deadlineLabel?: string }) {
+export function ApprovalPanel({
+  itemId,
+  deadlineLabel,
+  title,
+  cover,
+}: {
+  itemId: string;
+  deadlineLabel?: string;
+  /** The post, for the approval seal moment: its title, and its first photo if it has one. */
+  title: string;
+  cover?: string | null;
+}) {
   const [mode, setMode] = useState<"choose" | "changes">("choose");
+  // The seal is ready before it is needed.
+  preload("/empty/seal-top.webp", { as: "image" });
   const [state, action] = useActionState(async (prev: ActionState, fd: FormData) => {
     const result = await submitApproval(prev, fd);
     if (result?.ok) {
       if (fd.get("decision") === "approved") {
-        void celebrate();
+        stampApproved({ cover, title });
         toast.success(result.message ?? "Approved");
       } else {
         toast.success(result.message ?? "Changes requested");
@@ -37,7 +51,13 @@ export function ApprovalPanel({ itemId, deadlineLabel }: { itemId: string; deadl
 
       <AnimatePresence mode="wait" initial={false}>
         {mode === "choose" ? (
-          <motion.div key="choose" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }} transition={{ duration: 0.18 }}>
+          <motion.div
+            key="choose"
+            initial={{ opacity: 0, x: -12 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -12 }}
+            transition={{ duration: 0.18 }}
+          >
             <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
               <SubmitButton variant="success" size="lg" name="decision" value="approved" pendingLabel="Approving…">
                 <CheckCircle2 className="size-5" aria-hidden /> Approve
@@ -48,7 +68,13 @@ export function ApprovalPanel({ itemId, deadlineLabel }: { itemId: string; deadl
             </div>
           </motion.div>
         ) : (
-          <motion.div key="changes" initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} transition={{ duration: 0.18 }}>
+          <motion.div
+            key="changes"
+            initial={{ opacity: 0, x: 12 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 12 }}
+            transition={{ duration: 0.18 }}
+          >
             <label className="mt-4 block">
               <span className="label">What should we change?</span>
               <textarea

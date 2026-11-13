@@ -395,6 +395,78 @@
   stroke-dasharray: 32;
   animation: draw-check 0.5s 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
+/* Empty-screen pictures drop onto the page and settle */
+@keyframes art-in {
+  from {
+    opacity: 0;
+    transform: perspective(400px) translateY(-14px) rotateX(28deg) scale(0.88);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-art-in {
+  animation: art-in 0.7s var(--ease-bouncy) backwards;
+}
+
+/*
+ * Cards marked data-tilt lean toward the mouse and catch the light
+ * (components/tilt-layer.tsx sets the angles). Mouse only; never with reduced
+ * motion. Unlayered, so it wins over the cards' own transition utilities.
+ */
+[data-tilt] {
+  transition-property: transform, translate, box-shadow, border-color, scale;
+  transition-duration: 0.6s;
+  transition-timing-function: var(--ease-spring);
+}
+[data-tilt][data-tilting] {
+  transform: perspective(700px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+  scale: 1.02;
+  box-shadow: 0 22px 40px -22px rgb(29 27 22 / 0.42);
+  transition-duration: 0.14s, 0.6s, 0.6s, 0.6s, 0.6s;
+  transition-timing-function: ease-out, var(--ease-spring), var(--ease-spring), var(--ease-spring), var(--ease-spring);
+}
+[data-tilt]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(circle at var(--glare-x, 50%) var(--glare-y, 0%), rgb(255 255 255 / 0.32), rgb(255 255 255 / 0) 58%);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+[data-tilt][data-tilting]::after {
+  opacity: 1;
+}
+
+/* Plan calendar: hovering a post lifts its picture up like a printed card */
+.print-card {
+  opacity: 0;
+  transform: perspective(600px) translateY(8px) rotateX(-24deg) scale(0.92);
+  transform-origin: 50% 100%;
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+.group\/chip:hover .print-card,
+.group\/chip:focus-visible .print-card {
+  opacity: 1;
+  transform: perspective(600px) rotateX(6deg);
+  transition:
+    opacity 0.25s ease 0.12s,
+    transform 0.55s var(--ease-bouncy) 0.12s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .print-card,
+  .group\/chip:hover .print-card,
+  .group\/chip:focus-visible .print-card {
+    transform: none;
+    transition: opacity 0.15s ease;
+  }
+}
 /* Lists: children rise one after another */
 .stagger > * {
   animation: rise 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;

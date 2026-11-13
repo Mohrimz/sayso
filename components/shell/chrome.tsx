@@ -151,7 +151,7 @@ function Sidebar({
               <WorkspaceSwitcher workspaces={data.workspaces} chat={chat} current={current} isAgency={isAgency} isAdmin={viewer.isAdmin} onNavigate={onNavigate} />
             ) : current ? (
               <div className="flex items-center gap-3 rounded-xl bg-sunken/70 px-3 py-2.5">
-                <Avatar name={current.name} />
+                <Avatar name={current.name} src={current.logo} />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-ink">{current.name}</p>
                   <p className="text-xs text-muted">{ROLE_LABELS[current.role]}</p>
@@ -169,7 +169,7 @@ function Sidebar({
               <div className="mt-2 space-y-0.5">
                 {data.workspaces.map((w) => (
                   <Link key={w.slug} href={`/w/${w.slug}`} onClick={onNavigate} className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-sunken">
-                    <Avatar name={w.name} size="sm" />
+                    <Avatar name={w.name} src={w.logo} size="sm" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-ink">{w.name}</span>
                       <span className="block truncate text-xs text-muted">{clientSummary(w, chat)}</span>
@@ -240,7 +240,7 @@ function WorkspaceSwitcher({
     <DropdownMenu.Root>
       <DropdownMenu.Trigger className="flex w-full items-center gap-3 rounded-xl border border-line bg-surface px-3 py-2.5 text-left shadow-[0_1px_0_rgba(0,0,0,0.03)] outline-none hover:border-line-strong focus-visible:border-accent data-[state=open]:border-accent">
         {current ? (
-          <Avatar name={current.name} />
+          <Avatar name={current.name} src={current.logo} />
         ) : (
           <span className="flex size-8 items-center justify-center rounded-full bg-sunken text-muted">
             <House className="size-4" aria-hidden />
@@ -267,7 +267,7 @@ function WorkspaceSwitcher({
             {workspaces.map((w) => (
               <DropdownMenu.Item key={w.slug} asChild>
                 <Link href={`/w/${w.slug}`} onClick={onNavigate} className={menuItem}>
-                  <Avatar name={w.name} size="sm" />
+                  <Avatar name={w.name} src={w.logo} size="sm" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-ink">{w.name}</span>
                     {isAgency ? <span className="block truncate text-[11px] text-muted">{clientSummary(w, chat)}</span> : null}

@@ -1,5 +1,7 @@
 import { getWorkspaceAccess } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { SendWork } from "@/components/task-work";
+import { getSentStatus } from "@/lib/approved-work";
 import { getAgencyAssignees, getPeople, getWorkspaceMembers } from "@/lib/queries";
 import { Card } from "@/components/ui";
 import { ActionForm, SubmitButton } from "@/components/action-form";
@@ -32,11 +34,25 @@ export default async function WorkspaceTasks({ params }: PageProps<"/w/[slug]/ta
     can.isAgency && tasks.length
       ? supabase
           .from("task_submissions")
-          .select("task_id, decision, review_note, submitted_at")
-          .in("task_id", tasks.map((t) => t.id))
+          .select("task_id, decision, review_note, submitted_at, content_item_id, reviewed_at, submitted_by")
+          .in(
+            "task_id",
+            tasks.map((t) => t.id),
+          )
           .order("submitted_at", { ascending: false })
-      : Promise.resolve({ data: [] as { task_id: string; decision: string | null; review_note: string | null }[] }),
+      : Promise.resolve({
+          data: [] as {
+            task_id: string;
+            decision: string | null;
+            review_note: string | null;
+            content_item_id: string | null;
+            reviewed_at: string | null;
+            submitted_by: string | null;
+          }[],
+        }),
   ]);
+  // Approved work: whether it has gone to the client yet (agency only).
+  const sentStatus = await getSentStatus(supabase, rounds ?? []);
   // The latest round of submitted work for each task (agency only).
   const lastReview = new Map<string, { decision: string | null; note: string | null }>();
   for (const r of rounds ?? []) if (!lastReview.has(r.task_id)) lastReview.set(r.task_id, { decision: r.decision, note: r.review_note });
@@ -44,12 +60,29 @@ export default async function WorkspaceTasks({ params }: PageProps<"/w/[slug]/ta
     ...t,
     ownerName: t.owner_id ? people.get(t.owner_id)?.name : null,
     lastReview: lastReview.get(t.id) ?? null,
+    sentStatus: (() => {
+      const st = sentStatus.get(t.id);
+      return st
+        ? {
+            href: `/w/${workspace.slug}/content/${st.postId}`,
+            senderId: st.senderId,
+            sent: st.sent,
+          }
+        : null;
+    })(),
   });
-  const taskViewer = { id: viewer.id, isAgency: can.isAgency, isAdmin: can.isAgency && isAdmin };
+  const taskViewer = {
+    id: viewer.id,
+    isAgency: can.isAgency,
+    isAdmin: can.isAgency && isAdmin,
+  };
 
   const clientOpen = tasks.filter((t) => t.owner_side === "client" && t.status !== "done").map(view);
   const agencyOpen = tasks.filter((t) => t.owner_side === "agency" && t.status !== "done").map(view);
-  const done = tasks.filter((t) => t.status === "done").slice(0, 20).map(view);
+  const done = tasks
+    .filter((t) => t.status === "done")
+    .slice(0, 20)
+    .map(view);
   const clientMembers = members.filter((m) => m.role !== "team_member");
 
   return (
@@ -61,54 +94,78 @@ export default async function WorkspaceTasks({ params }: PageProps<"/w/[slug]/ta
             {can.isAgency ? "Work that isn't a post, and anything waiting on the client." : "Things the team needs from you."}
           </p>
         </div>
-        {can.managePlans ? (
-          <Sheet title="Add a task" triggerLabel="Add task" icon="plus" triggerVariant="primary">
-            <ActionForm action={createTask} className="space-y-4">
-              <input type="hidden" name="workspace_id" value={workspace.id} />
-              <div>
-                <label className="label" htmlFor="task-title">What needs doing?</label>
-                <input id="task-title" name="title" required className="field" placeholder="e.g. Update Facebook bio" />
-              </div>
-              <div>
-                <label className="label" htmlFor="task-desc">Details (optional)</label>
-                <textarea id="task-desc" name="description" rows={3} className="field" />
-              </div>
-              <div className="grid gap-4 sm:grid-cols-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Team members can send work for review without a task on the board. */}
+          {can.isAgency && !isAdmin ? <SendWork clients={[{ id: workspace.id, name: workspace.name }]} /> : null}
+          {can.managePlans ? (
+            <Sheet title="Add a task" triggerLabel="Add task" icon="plus" triggerVariant="primary">
+              <ActionForm action={createTask} className="space-y-4">
+                <input type="hidden" name="workspace_id" value={workspace.id} />
                 <div>
-                  <label className="label" htmlFor="task-owner">Who does it?</label>
-                  <select id="task-owner" name="owner" className="field" defaultValue={`agency:${viewer.id}`}>
-                    <optgroup label="Agency">
-                      {assignees.map((a) => (
-                        <option key={a.id} value={`agency:${a.id}`}>{a.name}</option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Client">
-                      <option value="client:">Any approver</option>
-                      {clientMembers.map((m) => (
-                        <option key={m.id} value={`client:${m.id}`}>{m.name}</option>
-                      ))}
-                    </optgroup>
-                  </select>
+                  <label className="label" htmlFor="task-title">
+                    What needs doing?
+                  </label>
+                  <input id="task-title" name="title" required className="field" placeholder="e.g. Update Facebook bio" />
                 </div>
                 <div>
-                  <label className="label" htmlFor="task-due">Due date</label>
-                  <input id="task-due" type="date" name="due_date" className="field" />
+                  <label className="label" htmlFor="task-desc">
+                    Details (optional)
+                  </label>
+                  <textarea id="task-desc" name="description" rows={3} className="field" />
                 </div>
-              </div>
-              <label className="flex items-center gap-2 text-sm text-ink-soft">
-                <input type="checkbox" name="internal" className="size-4 rounded border-line-strong" />
-                Hide from the client
-              </label>
-              <SubmitButton pendingLabel="Adding…">Add task</SubmitButton>
-            </ActionForm>
-          </Sheet>
-        ) : null}
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="label" htmlFor="task-owner">
+                      Who does it?
+                    </label>
+                    <select id="task-owner" name="owner" className="field" defaultValue={`agency:${viewer.id}`}>
+                      <optgroup label="Agency">
+                        {assignees.map((a) => (
+                          <option key={a.id} value={`agency:${a.id}`}>
+                            {a.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Client">
+                        <option value="client:">Any approver</option>
+                        {clientMembers.map((m) => (
+                          <option key={m.id} value={`client:${m.id}`}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label" htmlFor="task-due">
+                      Due date
+                    </label>
+                    <input id="task-due" type="date" name="due_date" className="field" />
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 text-sm text-ink-soft">
+                  <input type="checkbox" name="internal" className="size-4 rounded border-line-strong" />
+                  Hide from the client
+                </label>
+                <SubmitButton pendingLabel="Adding…">Add task</SubmitButton>
+              </ActionForm>
+            </Sheet>
+          ) : null}
+        </div>
       </div>
 
       <Tabs
         tabs={[
-          { value: "client", label: can.isAgency ? "Waiting on client" : "For you", count: clientOpen.length },
-          { value: "agency", label: can.isAgency ? "Agency" : "Team is working on", count: agencyOpen.length },
+          {
+            value: "client",
+            label: can.isAgency ? "Waiting on client" : "For you",
+            count: clientOpen.length,
+          },
+          {
+            value: "agency",
+            label: can.isAgency ? "Agency" : "Team is working on",
+            count: agencyOpen.length,
+          },
           { value: "done", label: "Done" },
         ]}
       >
@@ -117,7 +174,7 @@ export default async function WorkspaceTasks({ params }: PageProps<"/w/[slug]/ta
             {clientOpen.length ? (
               <TaskList tasks={clientOpen} tz={tz} canEdit={can.managePlans} canTick={() => true} viewer={taskViewer} />
             ) : (
-              <CaughtUp title={can.isAgency ? "Nothing waiting on the client" : "Nothing needed from you"} />
+              <CaughtUp art="cards" title={can.isAgency ? "Nothing waiting on the client" : "Nothing needed from you"} />
             )}
           </Card>
         </TabsContent>
@@ -126,7 +183,7 @@ export default async function WorkspaceTasks({ params }: PageProps<"/w/[slug]/ta
             {agencyOpen.length ? (
               <TaskList tasks={agencyOpen} tz={tz} canEdit={can.managePlans} canTick={() => taskViewer.isAdmin} viewer={taskViewer} />
             ) : (
-              <CaughtUp title="No open tasks" />
+              <CaughtUp art="cards" title="No open tasks" />
             )}
           </Card>
         </TabsContent>
@@ -141,7 +198,7 @@ export default async function WorkspaceTasks({ params }: PageProps<"/w/[slug]/ta
                 viewer={taskViewer}
               />
             ) : (
-              <CaughtUp title="Nothing completed yet" />
+              <CaughtUp art="cards" title="Nothing completed yet" />
             )}
           </Card>
         </TabsContent>

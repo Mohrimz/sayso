@@ -4,7 +4,8 @@ import { CheckCircle2, ChevronLeft, CircleAlert, Clock, ExternalLink, Hourglass,
 import { getWorkspaceAccess } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { getAgencyAssignees, getPeople, getWorkspaceMembers } from "@/lib/queries";
-import { parseMedia, signMedia } from "@/lib/media";
+import { mediaDownloads, parseMedia, signMedia } from "@/lib/media";
+import { PostDownloads } from "@/components/post-downloads";
 import { CONTENT_TYPES, captionFor, platformLabel } from "@/lib/content";
 import { defaultApprovalDeadline, formatDateTime, isoToZonedInput, zoneLabel } from "@/lib/dates";
 import { asArray, asObject, type ApprovalRuleEntry, type ContentItem } from "@/lib/types";
@@ -25,7 +26,8 @@ import { Sheet } from "@/components/sheet";
 import { StatusBadge } from "@/components/status-badge";
 import { Tabs, TabsContent } from "@/components/tabs";
 import { TypeIcon } from "@/components/type-icon";
-import { internalReview, moveContent, saveLiveUrl, updateContentItem } from "@/app/actions/content";
+import { internalReview, moveContent, saveLiveUrl, sendApprovedWork, updateContentItem } from "@/app/actions/content";
+import { getApprovedWork } from "@/lib/approved-work";
 import { DeletePostButton } from "@/components/delete-post-button";
 import { PublishButton } from "@/components/publish-button";
 import { requestPublish } from "@/app/actions/publish";
@@ -59,6 +61,8 @@ export default async function ContentPage({ params, searchParams }: PageProps<"/
   ]);
 
   const versions = versionsRes.data ?? [];
+  // Task work an admin marked done: its maker sends the post to the client.
+  const approvedWork = can.isAgency ? await getApprovedWork(supabase, item, versions) : null;
   const comments = commentsRes.data ?? [];
   const approvals = approvalsRes.data ?? [];
   const notes = notesRes.data ?? [];
@@ -71,6 +75,8 @@ export default async function ContentPage({ params, searchParams }: PageProps<"/
   const latestSent = versions.find((v) => v.sent_to_client_at) ?? null;
   const workingCopy = can.isAgency && (!shown || (shown.id === versions[0]?.id && !shown.sent_to_client_at));
   const media = shown ? await signMedia(parseMedia(shown.media)) : [];
+  // Published: the files that went out (the version sent to the client), for everyone here to download.
+  const downloads = item.status === "published" && latestSent ? await mediaDownloads(parseMedia(latestSent.media)) : [];
   const source = workingCopy || !shown ? item : shown;
 
   const people = await getPeople([
@@ -81,6 +87,8 @@ export default async function ContentPage({ params, searchParams }: PageProps<"/
     ...approvals.map((a) => a.approver_id),
     ...notes.map((n) => n.author_id),
     ...versions.map((v) => v.created_by),
+    approvedWork?.senderId ?? null,
+    approvedWork?.reviewerId ?? null,
   ]);
   const nameOf = (uid: string | null) => (uid ? (people.get(uid)?.name ?? "Former user") : "Someone");
   const versionNumber = new Map(versions.map((v) => [v.id, v.version_number]));
@@ -222,6 +230,7 @@ export default async function ContentPage({ params, searchParams }: PageProps<"/
               <p className="mt-1 text-[13px] text-muted">You&apos;ll see a preview here when it&apos;s ready for approval.</p>
             </Card>
           )}
+          {downloads.length ? <PostDownloads files={downloads} title={item.title} /> : null}
           {can.isAgency && versions.length > 1 ? (
             <nav className="flex flex-wrap items-center justify-center gap-1.5" aria-label="Versions">
               {versions
@@ -264,6 +273,7 @@ export default async function ContentPage({ params, searchParams }: PageProps<"/
               approverCount={approvers.length}
               ruleNote={tagRule?.note}
               tz={tz}
+              cover={media.find((m) => m.kind === "image")?.src ?? null}
             />
           ) : (
             <AgencyWorkflow
@@ -290,6 +300,17 @@ export default async function ContentPage({ params, searchParams }: PageProps<"/
               }
               canPublish={can.markPublished}
               canSendToClient={can.sendToClient}
+              approvedWork={
+                approvedWork
+                  ? {
+                      pending: approvedWork.pending,
+                      mine: approvedWork.senderId === viewer.id,
+                      sender: nameOf(approvedWork.senderId),
+                      reviewer: approvedWork.reviewerId === viewer.id ? "You" : nameOf(approvedWork.reviewerId),
+                      sentAt: approvedWork.sentAt,
+                    }
+                  : null
+              }
               publishRequest={
                 item.publish_requested_at
                   ? { by: nameOf(item.publish_requested_by), mine: item.publish_requested_by === viewer.id, at: item.publish_requested_at }
@@ -462,6 +483,7 @@ function ClientDecision({
   approverCount,
   ruleNote,
   tz,
+  cover,
 }: {
   item: ContentItem;
   canApprove: boolean;
@@ -471,12 +493,18 @@ function ClientDecision({
   approverCount: number;
   ruleNote?: string;
   tz: string;
+  cover: string | null;
 }) {
   if (item.status === "client_review") {
     if (canApprove && !responded) {
       return (
         <div className="space-y-2">
-          <ApprovalPanel itemId={item.id} deadlineLabel={item.approval_deadline ? formatDateTime(item.approval_deadline, tz) : undefined} />
+          <ApprovalPanel
+            itemId={item.id}
+            title={item.title}
+            cover={cover}
+            deadlineLabel={item.approval_deadline ? formatDateTime(item.approval_deadline, tz) : undefined}
+          />
           {needsAll ? (
             <p className="px-1 text-xs text-muted">
               {ruleNote ?? "Every approver needs to sign off."} {approvedCount} of {approverCount} approved so far.
@@ -554,6 +582,7 @@ function AgencyWorkflow({
   publish,
   canPublish,
   canSendToClient,
+  approvedWork,
   publishRequest,
 }: {
   item: ContentItem;
@@ -570,8 +599,12 @@ function AgencyWorkflow({
   canPublish: boolean;
   /** Agency admins review posts and send them to the client; team members send them for review. */
   canSendToClient: boolean;
+  /** Task work an admin marked done. Its maker sends the post to the client; everyone else sees whether they have. */
+  approvedWork: { pending: boolean; mine: boolean; sender: string; reviewer: string; sentAt: string | null } | null;
   publishRequest: { by: string; mine: boolean; at: string } | null;
 }) {
+  const awaitingSend = Boolean(approvedWork?.pending);
+  const iSend = awaitingSend && Boolean(approvedWork?.mine);
   const canAutoPublish = Boolean(publish && !publish.blockedReason);
   const publishNow = publish ? <PublishButton itemId={item.id} {...publish} /> : null;
   const step = STEPS.indexOf(item.status);
@@ -609,7 +642,13 @@ function AgencyWorkflow({
         </div>
 
         <div className="space-y-4 p-4 sm:p-5">
-          <p className="text-[15px] font-medium text-ink">{next[item.status]}</p>
+          <p className="text-[15px] font-medium text-ink">
+            {awaitingSend && approvedWork
+              ? iSend
+                ? `${approvedWork.reviewer} marked your work as done. Send it to the client for review.`
+                : `${approvedWork.reviewer} marked ${approvedWork.sender}'s work as done. Waiting for ${approvedWork.sender} to send it to the client.`
+              : next[item.status]}
+          </p>
 
           {changeRequest ? (
             <div className="rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm">
@@ -622,7 +661,7 @@ function AgencyWorkflow({
 
           {item.status === "draft" ? (
             <div className="flex flex-wrap items-center gap-2">
-              {hasMedia ? (
+              {hasMedia && !awaitingSend ? (
                 <MoveButton itemId={item.id} to="internal_review" label={canSendToClient ? "Send for internal review" : "Send for review"} variant="primary" size="md" />
               ) : null}
               <Sheet title="Upload a new version" description="The previous version is kept in the history." triggerLabel={hasMedia ? "New version" : "Upload media"} icon="plus" triggerVariant={hasMedia ? "secondary" : "primary"} triggerSize="md">
@@ -631,11 +670,36 @@ function AgencyWorkflow({
             </div>
           ) : null}
 
-          {item.status === "internal_review" && !canSendToClient ? (
+          {iSend ? (
+            <ActionForm action={sendApprovedWork} className="space-y-3">
+              <input type="hidden" name="item_id" value={item.id} />
+              {!planShared ? (
+                <p className="rounded-lg bg-amber-50 px-3 py-2 text-[13px] text-amber-900">An admin needs to share this month&apos;s plan with the client before it can be sent.</p>
+              ) : null}
+              <label className="flex flex-wrap items-center gap-2 text-[13px] text-ink-soft">
+                Client should reply by
+                <input name="deadline" type="datetime-local" defaultValue={isoToZonedInput(defaultApprovalDeadline(item.planned_at), tz)} className="field w-auto py-1.5" />
+                <span className="text-muted">{zoneLabel(tz)} time. The client sees it in PT and LK.</span>
+              </label>
+              <SubmitButton variant="primary" pendingLabel="Sending…">
+                <Send className="size-4" aria-hidden /> Send to client
+              </SubmitButton>
+            </ActionForm>
+          ) : awaitingSend && approvedWork ? (
+            <p className="flex items-start gap-2 rounded-lg bg-sunken px-3 py-2.5 text-[13px] text-ink-soft">
+              <Hourglass className="mt-0.5 size-4 shrink-0 text-muted" aria-hidden />
+              <span>
+                Not sent to the client yet.
+                {approvedWork.reviewer === "You" ? " You'll get a notification when it's with the client." : ""}
+              </span>
+            </p>
+          ) : null}
+
+          {item.status === "internal_review" && !canSendToClient && !awaitingSend ? (
             <MoveButton itemId={item.id} to="draft" label="Withdraw to draft" variant="ghost" />
           ) : null}
 
-          {item.status === "internal_review" && canSendToClient ? (
+          {item.status === "internal_review" && canSendToClient && !awaitingSend ? (
             <ActionForm action={internalReview} className="space-y-3">
               <input type="hidden" name="item_id" value={item.id} />
               {!planShared ? (
@@ -660,6 +724,11 @@ function AgencyWorkflow({
 
           {item.status === "client_review" ? (
             <div className="space-y-3 text-sm">
+              {approvedWork?.sentAt ? (
+                <p className="flex items-center gap-2 text-ink-soft">
+                  <Send className="size-4 text-blue-600" aria-hidden /> Sent to the client {formatDateTime(approvedWork.sentAt, tz)}
+                </p>
+              ) : null}
               <p className="text-muted">
                 {needsAll ? `Every approver must sign off (${approvedNames.length} of ${approverCount}). ` : "One approval is enough. "}
                 <DeadlineText iso={item.approval_deadline} tz={tz} />

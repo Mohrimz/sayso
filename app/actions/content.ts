@@ -292,6 +292,23 @@ export async function internalReview(_: ActionState, fd: FormData): Promise<Acti
   return done("Sent to the client for approval.");
 }
 
+/** The team member whose task work an admin marked done sends the post to the client. */
+export async function sendApprovedWork(_: ActionState, fd: FormData): Promise<ActionState> {
+  await requireViewer();
+  const ctx = await itemAccess(str(fd, "item_id"));
+  if (!ctx?.access.can.isAgency) return fail("Only the agency team can do that.");
+  const deadlineLocal = str(fd, "deadline");
+  const deadline = deadlineLocal ? zonedInputToIso(deadlineLocal, ctx.access.workspace.time_zone) : null;
+  const { error } = await ctx.supabase.rpc("send_approved_work", {
+    p_item: ctx.item.id,
+    ...(deadline ? { p_deadline: deadline } : {}),
+  });
+  if (error) return fail(friendlyError(error));
+  deliverNotificationsLater();
+  refresh();
+  return done("Sent to the client for approval.");
+}
+
 export async function submitApproval(_: ActionState, fd: FormData): Promise<ActionState> {
   await requireViewer();
   const ctx = await itemAccess(str(fd, "item_id"));

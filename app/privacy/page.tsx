@@ -233,7 +233,7 @@ export default function PrivacyPage() {
                   Your name, photo, job title and phone number are visible to the people you work with in {APP_NAME}: the agency team can see client
                   users’ profiles, and signed-in client users can see the agency team’s profiles.
                 </li>
-                <li>In chat, others in the conversation can see when you’ve read their messages (“Seen by”).</li>
+                <li>In chat, the agency team can see when people have read their messages (“Seen by”). Clients don’t see read receipts.</li>
               </List>
             </Section>
 

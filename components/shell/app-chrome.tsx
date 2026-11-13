@@ -2,6 +2,7 @@ import { getMyWorkspaces, getViewer } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import type { WorkspaceRole } from "@/lib/permissions";
 import { chatKey } from "@/lib/chat";
+import { avatarUrl } from "@/lib/avatar";
 import { Logo } from "@/components/logo";
 import { Skeleton } from "@/components/ui";
 import { Chrome, type ShellWorkspace } from "./chrome";
@@ -40,6 +41,7 @@ export async function AppChrome() {
         id: w.id,
         slug: w.slug,
         name: w.name,
+        logo: avatarUrl(w.logo_path),
         status: w.status,
         role,
         awaiting: items.filter((i) => i.status === "client_review").length,

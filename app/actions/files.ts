@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { findWorkspaceAccess, requireViewer } from "@/lib/auth";
 import { removeFiles, signedUrls, uploadTarget, type Bucket, type UploadTarget } from "@/lib/files";
-import { attachmentPrefix, isUuid, MAX_FILE_BYTES as CHAT_MAX_BYTES, SIGNED_URL_TTL, type ChatChannel } from "@/lib/chat";
+import { attachmentPrefix, isChannel, isUuid, MAX_FILE_BYTES as CHAT_MAX_BYTES, SIGNED_URL_TTL, type ChatChannel } from "@/lib/chat";
 import { MAX_FILE_BYTES as LIBRARY_MAX_BYTES, MAX_FILES_PER_UPLOAD } from "@/lib/library";
 
 /**
@@ -46,7 +46,7 @@ async function resolveScope(input: UploadScope): Promise<{ bucket: Bucket; prefi
     return { bucket: "workspace-files", prefix: `${input.workspaceId}/library/`, maxBytes: LIBRARY_MAX_BYTES };
   }
   // Chat: the same check the database uses for messages.
-  if (input.channel !== "client" && input.channel !== "team") return { error: "Chat not found." };
+  if (!isChannel(input.channel)) return { error: "Chat not found." };
   await requireViewer();
   const supabase = await createClient();
   const { data: allowed } = await supabase.rpc("can_access_chat", { p_ws: input.workspaceId, p_channel: input.channel });

@@ -46,6 +46,7 @@ export async function sendMessage(input: {
   const access = await findWorkspaceAccess("id", workspaceId);
   if (!access) return { ok: false, error: "You don't have access to this chat." };
   if (channel === "team" && !access.can.isAgency) return { ok: false, error: "Only the agency team can use the team chat." };
+  if (channel === "direct" && access.can.isAgency && access.role !== "admin") return { ok: false, error: "The direct chat is between the client and the agency admins." };
 
   const body = typeof input.body === "string" ? input.body.trim() : "";
   if (body.length > MAX_MESSAGE_LENGTH) return { ok: false, error: `Messages can be up to ${MAX_MESSAGE_LENGTH} characters.` };

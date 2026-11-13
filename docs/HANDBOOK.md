@@ -74,8 +74,11 @@ To do → In progress → In review → Done
   - **New post:** if the post isn't in the plan yet, they can make it right there. It's selected automatically when the client has no posts in progress.
   - **Pre-filled:** the title comes from the task, and the type is guessed from it ("Carousels" → Carousel). The date is optional.
   - **Where it goes:** it's added to the plan for its month (`createPostForTask`). If that month has no plan, an internal draft plan is created for it.
+- **Work without a task:** team members also have **Send work** on the Team board and on a client's Tasks page. They say what the work is, pick the client and post, and upload it. It gets a task of its own, assigned to them (`startOwnWork`), and is reviewed the same way.
+- **Seeing the work:** submitted photos open full size, with download, in **Review**. The person who sent the work can look at it again with **View work**.
 - **Reviewing:** agency admins get a notification and email. The link opens the review on the Team board (`/tasks?review=<task>`).
 - **Mark done** adds the files to that post as its next version, as if they'd been uploaded on the post, and completes the task.
+- **Sending to the client:** after Mark done, the person who made the work gets a "Marked as done" notification linking to the post. They send it to the client with **Send to client** (`send_approved_work`, migration `…_team_sends_approved_work.sql`). The admin has no send button for that post. Instead, the post and the done task show **Not sent to client yet** or **Sent to client**, and the admin is notified when it's sent. If the files change after approval, it goes back through review.
 - **Request changes** needs a note. The task goes back to **In progress**, and the note shows on it until the next submission.
 - **Who does what:**
   - Only the person a task is assigned to can submit work for it (anyone on the team when it's unassigned).
@@ -96,9 +99,11 @@ Each client workspace has two conversations (`supabase/migrations/…_chat.sql`,
 How it behaves:
 
 - **Live:** messages, deletions and "Seen by" arrive over Supabase Realtime; typing indicators and "here now" use a private Realtime channel that only people in the conversation can join. After a dropped connection or a sleeping tab, missed messages are fetched automatically.
+- **Read status:** agency staff (admins and team members) see a read status under their own latest message in each chat: "Seen by Maya and Sam", or "Not seen yet" until someone else opens the chat. Clients never see who has read anything; the database only lets them read their own marker (migration `…_chat_reads_agency_only.sql`).
 - **Files:** photos, videos and documents up to 50 MB (10 per message). Pick, paste or drag them in; they upload straight to the private `chat-files` bucket while you type.
 - **Unread:** each person has a "read up to" marker per conversation. Badges on the Chat item, the client list and the Inbox update live.
-- **Notifications:** at most one unread notification (and one email) per conversation. Later messages update it instead of adding more, and people who were reading the chat in the last two minutes aren't notified at all. Each person can turn chat emails off in Account. Every agency admin is notified about every chat, along with the team members assigned to that client (migration `…_chat_notify_admins.sql`). On a computer the chat fills the whole area to the right of the sidebar.
+- **Three conversations per client:** **Client chat** (the client and the whole agency team on that client), **Team only** (agency only), and **Direct** (agency admins and the client only; team members can neither open nor read it). Admins see all three tabs, team members see Client chat and Team only, and clients see Team chat and Direct. Direct messages notify the admins and the client, never team members (migrations `…_chat_direct_channel.sql` and `…_chat_direct.sql`).
+- **Notifications:** at most one unread notification (and one email) per conversation. Later messages update it instead of adding more, and people who were reading the chat in the last two minutes aren't notified at all. Each person can turn chat emails off in Account. Every agency admin is notified about every chat, along with the team members assigned to that client (migration `…_chat_notify_admins.sql`). On a computer the chat fills the whole area to the right of the sidebar. When someone is typing, a bubble with moving dots appears at the bottom of the conversation under the last message, with their name and photo; it goes when they send or stop.
 - **Post preview:** a post shows its photos and videos exactly as uploaded, with nothing cropped, and the file size and shape underneath (for example "1080 × 1350 · 4:5"). With several files, move between them with the arrows, by clicking the left or right side of the photo, by swiping, with the dots, or with the arrow keys. The caption and hashtags sit below (`components/post-preview.tsx`). While a post is still in progress (planned, draft or internal review), the agency team can change the order of its photos there: drag a numbered thumbnail, or use **Move earlier**, **Move later** and **Make first**. They can also type the caption and hashtags straight into the box under the preview and press **Save caption** (Ctrl+Enter also saves). If the latest version was already sent to the client, a new order is saved as a new version (`reorder_post_media()`, migration `…_reorder_post_media.sql`).
 - **Reactions:** hover a message and press the smiley to pick 👍 ❤️ 😂 😮 😢 or 🙏. Reactions show as chips under the message with a count; hover a chip to see who reacted, click it to add or remove yours. Everyone in the chat sees them live. Stored in `messages.reactions` and changed only through `toggle_reaction()` (migration `…_chat_reactions.sql`).
 - **Edit:** the author can change the text of their own message from its ⋯ menu (Enter saves, Esc cancels). Edited messages are marked "edited", everyone sees the new text live, and notification previews follow it. Files, replies and reactions stay as they are. Stored through `edit_message()` with `messages.edited_at` (migration `…_chat_edit_message.sql`).
@@ -151,10 +156,9 @@ Post media, Library files, chat attachments and profile pictures all go through 
 
 Each client has a **Library** (`/w/<client>/library`): its product photos, videos, logos and documents in one place.
 
-- **Files tab:** a photo and video grid with filters (All, Photos, Videos, Documents), folders and search by name. Click a file to preview it large and download it with its own name. Only agency admins can rename, move, add a note to or delete a file; this is enforced in the database (migration `…_library_admins_edit.sql`).
+- **Files:** a photo and video grid with filters (All, Photos, Videos, Documents), folders and search by name. Click a file to preview it large and download it with its own name. Only agency admins can rename, move, add a note to or delete a file; this is enforced in the database (migration `…_library_admins_edit.sql`).
 - **Downloading several files:** everyone can press **Download all** (everything in the current view) or **Select** to tick files and download just those. Several files come as one ZIP, organised by folder and built in the browser from the files' own links (`client-zip`). Very large ZIPs are written straight to disk in Chrome and Edge.
-- **Uploading:** the agency team and client approvers press **Upload files**, drop in up to 50 files (500 MB each) and pick or type a folder. Viewers can browse and download only. When a client uploads, the agency admins and that client's team members get a notification.
-- **From posts tab:** every photo and video used in the client's posts, each linking to its post. Clients only see versions that were sent to them.
+- **Uploading:** everyone presses **Upload files** and drops in up to 50 files (500 MB each). The agency team picks or types a folder. Clients (approvers and viewers) don't choose: whatever a client uploads goes into the **From the client** folder, so the agency's folders stay as arranged (the app and a database trigger both enforce it, migration `…_library_client_uploads.sql`). When a client uploads, the agency admins and that client's team members get a notification and an email.
 - **Brand kit:** its logos card shows the Library's "Brand" folder. Files uploaded to the Brand kit before the Library existed were moved into that folder by the migration.
 - **How it's stored:** files go in the private `workspace-files` bucket under `<client>/library/<random>/<file>`. The `assets` table (migration `…_library.sql`) holds the name, folder, type, size, note and uploader. Row-level security: members can see files, the agency team and approvers can add them, and only agency admins can change or delete them.
 
@@ -171,6 +175,16 @@ Each client has an **Offers** page (`/w/<client>/offers`). The client tells the 
 ### Profile reminders for clients
 
 Clients whose profile is missing their name, job title, phone number or photo get a **"Complete your profile"** notification. It lists what's missing and links to the Account page, which shows a "Finish your profile" checklist. It's sent when they're added to a client, and was sent once to everyone already there when the feature was added. As soon as the last detail is filled in, the reminder is marked read and **"Your profile is complete"** arrives in the bell, live. Both are in-app only (no email). It all happens in the database (migration `…_profile_nudges.sql`: `nudge_profile()`, triggers on `workspace_members` and `profiles`), so it works however the profile is edited.
+
+### Client logos
+
+A client can have a logo, shown beside its name in the sidebar, the dashboard, the inbox and the client switcher. Without one, the client's initials are shown. Set it with:
+
+```
+node --env-file=.env.production.local scripts/set-client-logo.mjs <client-slug> <image file>
+```
+
+The script crops the image to a square, saves it as a 400px JPEG in the `avatars` bucket at `<workspace id>/logo-<random>.jpg`, and stores the path in `workspaces.logo_path` (migration `…_workspace_logo.sql`). Pass `none` instead of a file to go back to initials.
 
 ### Client logins and first sign-in
 
@@ -277,7 +291,18 @@ Useful scripts: `npm run db:types` regenerates `lib/database.types.ts` after sch
 - **Times:** every clock time is shown in US Pacific time first (PT, where the clients' audiences are) and then Sri Lanka time (LK, where the agency works), for example "Mon 9 Nov, 19:30 PT · Tue 10 Nov, 09:00 LK". A client in another time zone gets theirs as a third. It's one place in the code: `formatDateTime` and `formatTime` in `lib/dates.ts` (`US_TIME_ZONE`, `AGENCY_TIME_ZONE`). The calendar still places posts on days in the client's own time zone.
 - **Navigation:** a left sidebar on desktop (descriptions appear as tooltips), a top bar with the breadcrumb, a **Help** button and notifications; on phones, a slide-out menu plus a bottom tab bar inside a client workspace (`components/shell/`).
 - **Page help:** nothing is shown automatically. The Help button opens a short guide for the current page, worded for the reader's role. All of this text, and the sidebar tooltips, lives in `lib/insights.ts`; register new pages in `routeFor()` there.
-- **UI libraries:** [Motion](https://motion.dev) for animation (page transitions, staggered lists, progress bars, the sliding nav highlight), [Radix UI](https://www.radix-ui.com) for accessible menus, tabs, tooltips, popovers and slide-in panels, [Sonner](https://sonner.emilkowal.ski) for toast confirmations, and `canvas-confetti` for the approval celebration. Animations respect the "reduce motion" system setting.
+- **UI libraries:** [Motion](https://motion.dev) for animation (page transitions, staggered lists, progress bars, the sliding nav highlight), [Radix UI](https://www.radix-ui.com) for accessible menus, tabs, tooltips, popovers and slide-in panels, [Sonner](https://sonner.emilkowal.ski) for toast confirmations, and `canvas-confetti` for the first-sign-in celebration. Animations respect the "reduce motion" system setting.
+
+### 3D touches
+
+Kept to a few moments so pages stay fast on phones. Each has a still version for "reduce motion".
+
+- **Approval seal:** when a client presses **Approve**, the post turns to face them as a card and a wax seal with the Sayso tick is pressed onto it (about 1.9s; never blocks the page). `stampApproved()` in `components/approved-seal.ts`, called from `components/approval-panel.tsx`. It uses plain DOM and the Web Animations API, so it keeps playing while the page swaps the form for the "Approved" card.
+- **Brand kit logo tile:** the client's logo (`workspaces.logo_path`) as a thick glossy tile that turns toward the mouse and sways slowly on phones. Pure CSS 3D, `components/brand-tile-3d.tsx`. Initials show when there's no logo, or it can't be loaded.
+- **Card tilt:** Library files and the client home's approval cards lean toward the mouse and catch the light. Mark any card with `data-tilt` (optionally `data-tilt="5"` for the strongest lean in degrees, default 7); one listener in `components/tilt-layer.tsx` (mounted in `components/providers.tsx`) drives them all, and the look is in `app/globals.css`. Mouse only.
+- **Plan calendar:** hovering a post lifts its first photo up like a printed card (`.print-card`, `components/timeline.tsx`). On phones the day list shows a small picture instead of the type icon. The plan page loads them with `getThumbnails()`.
+- **Carousels:** in the post preview the next photos wait behind as a stack; moving forward brings the next one off the stack, moving back drops the earlier one in from the front (`components/post-preview.tsx`).
+- **Empty screens:** `<CaughtUp art="seal" | "envelope" | "cards" | "calendar">` shows a small 3D picture in the logo's graphite and ember (`public/empty/*.webp`, transparent, about 10 KB each). They were rendered with three.js from the brand paths and the same materials as the 3D logo, so they match it. `public/empty/seal-top.webp` is the face-on seal used by the approval moment.
 
 ---
 

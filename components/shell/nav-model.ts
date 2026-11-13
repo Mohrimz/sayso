@@ -11,6 +11,8 @@ export type ShellWorkspace = {
   id: string;
   slug: string;
   name: string;
+  /** The client's logo (a /avatars/… address), or null to show initials. */
+  logo: string | null;
   status: string;
   role: WorkspaceRole;
   awaiting: number;
@@ -29,9 +31,9 @@ export type ShellData = {
 export type NavIcon = ComponentType<{ className?: string; strokeWidth?: number }>;
 export type NavItem = { key: string; href: string; label: string; icon: NavIcon; active: boolean; badge?: { count: number; tone: "accent" | "orange" } };
 
-/** Unread chat messages in a workspace (team-only chat included for the agency). */
+/** Unread chat messages in a workspace, across every conversation the person can see. */
 export function chatUnreadFor(ws: { id: string }, counts: ChatCounts) {
-  return (counts[chatKey(ws.id, "client")] ?? 0) + (counts[chatKey(ws.id, "team")] ?? 0);
+  return (counts[chatKey(ws.id, "client")] ?? 0) + (counts[chatKey(ws.id, "team")] ?? 0) + (counts[chatKey(ws.id, "direct")] ?? 0);
 }
 
 export function currentWorkspace(pathname: string, data: ShellData): ShellWorkspace | undefined {

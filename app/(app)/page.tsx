@@ -1,3 +1,4 @@
+import { avatarUrl } from "@/lib/avatar";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getMyWorkspaces, getViewer } from "@/lib/auth";
@@ -29,7 +30,7 @@ export default async function Home() {
       <Card className="divide-y divide-line">
         {workspaces.map((w) => (
           <Link key={w.id} href={`/w/${w.slug}`} className="flex items-center gap-3 px-4 py-3 hover:bg-sunken">
-            <Avatar name={w.name} />
+            <Avatar name={w.name} src={avatarUrl(w.logo_path)} />
             <span className="font-medium">{w.name}</span>
           </Link>
         ))}

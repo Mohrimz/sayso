@@ -13,10 +13,21 @@ import { cn } from "@/lib/utils";
 type Pending = { key: string; file: File; status: "waiting" | "uploading" | "done" | "failed"; error?: string };
 
 /** "Upload files": drop or choose files, pick a folder, and they're added to the Library. */
-export function LibraryUploader({ workspaceId, folders, defaultFolder }: { workspaceId: string; folders: string[]; defaultFolder?: string }) {
+export function LibraryUploader({
+  workspaceId,
+  folders,
+  defaultFolder,
+  fixedFolder,
+}: {
+  workspaceId: string;
+  folders: string[];
+  defaultFolder?: string;
+  /** Clients don't choose: their files always go into this folder. */
+  fixedFolder?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Pending[]>([]);
-  const [folder, setFolder] = useState(defaultFolder ?? "Product photos");
+  const [folder, setFolder] = useState(fixedFolder ?? defaultFolder ?? "Product photos");
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
@@ -150,6 +161,11 @@ export function LibraryUploader({ workspaceId, folders, defaultFolder }: { works
               </ul>
             ) : null}
 
+            {fixedFolder ? (
+              <p className="rounded-lg bg-sunken px-3 py-2 text-[13px] text-ink-soft">
+                Your files go into the <span className="font-medium text-ink">{fixedFolder}</span> folder, where the team will find them.
+              </p>
+            ) : (
             <div>
               <label htmlFor={`${listId}-folder`} className="label">
                 Folder
@@ -171,6 +187,7 @@ export function LibraryUploader({ workspaceId, folders, defaultFolder }: { works
               </datalist>
               <p className="hint mt-1">Pick a folder or type a new one.</p>
             </div>
+            )}
           </div>
 
           <div className="flex justify-end gap-2 border-t border-line px-5 py-4">

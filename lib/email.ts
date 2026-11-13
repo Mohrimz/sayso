@@ -280,6 +280,7 @@ const PREF_FOR_TYPE: Record<string, keyof NotificationPrefs> = {
   task_assigned: "email_tasks",
   task_submitted: "email_tasks",
   task_reviewed: "email_tasks",
+  sent_to_client: "email_approvals",
   message: "email_messages",
   mention: "email_messages",
   offer: "email_offers",
@@ -287,7 +288,8 @@ const PREF_FOR_TYPE: Record<string, keyof NotificationPrefs> = {
 
 const CTA_FOR_TYPE: Record<string, string> = {
   task_submitted: "Review the work",
-  task_reviewed: "Open your tasks",
+  task_reviewed: "Open it",
+  sent_to_client: "Open the post",
   approval_requested: "Review and approve",
   publish_requested: "Open the post",
   review_requested: "Review the post",

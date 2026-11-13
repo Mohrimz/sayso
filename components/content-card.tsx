@@ -15,7 +15,12 @@ export function Thumb({ media, type, className }: { media?: SignedMedia; type: C
     <div className={cn("relative overflow-hidden rounded-lg bg-sunken", className)}>
       {media?.kind === "image" ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={media.src} alt="" className="h-full w-full object-cover transition-[scale] duration-700 ease-out-expo group-hover:scale-[1.05]" loading="lazy" />
+        <img
+          src={media.src}
+          alt=""
+          className="h-full w-full object-cover transition-[scale] duration-700 ease-out-expo group-hover:scale-[1.05]"
+          loading="lazy"
+        />
       ) : media?.kind === "video" ? (
         <video src={media.src} muted playsInline preload="metadata" className="h-full w-full object-cover" />
       ) : (
@@ -32,9 +37,17 @@ export function DeadlineText({ iso, tz }: { iso: string | null; tz: string }) {
   const days = daysUntil(iso);
   const overdue = days < 0;
   return (
-    <span className={cn("inline-flex items-center gap-1", overdue ? "font-medium text-danger" : days <= 1 ? "font-medium text-orange-700" : "text-muted")}>
+    <span
+      className={cn("inline-flex items-center gap-1", overdue ? "font-medium text-danger" : days <= 1 ? "font-medium text-orange-700" : "text-muted")}
+    >
       <Clock className="size-3" aria-hidden />
-      {overdue ? `Overdue since ${formatDateTime(iso, tz)}` : days === 0 ? "Due today" : days === 1 ? "Due tomorrow" : `Due ${formatDateTime(iso, tz)}`}
+      {overdue
+        ? `Overdue since ${formatDateTime(iso, tz)}`
+        : days === 0
+          ? "Due today"
+          : days === 1
+            ? "Due tomorrow"
+            : `Due ${formatDateTime(iso, tz)}`}
     </span>
   );
 }
@@ -54,10 +67,7 @@ export function ApprovalCard({
   side: "agency" | "client";
 }) {
   return (
-    <Link
-      href={href}
-      className="lift group flex gap-3 rounded-xl border border-line bg-surface p-3"
-    >
+    <Link href={href} data-tilt="5" className="lift group relative flex gap-3 rounded-xl border border-line bg-surface p-3">
       <Thumb media={media} type={item.type} className="aspect-[4/5] w-20 shrink-0" />
       <div className="flex min-w-0 flex-1 flex-col">
         <p className="line-clamp-2 text-sm font-medium text-ink group-hover:underline">{item.title}</p>

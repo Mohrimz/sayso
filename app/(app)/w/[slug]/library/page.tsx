@@ -1,15 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { FileText, Play, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { getWorkspaceAccess } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { getPeople } from "@/lib/queries";
-import { parseMedia, signMedia } from "@/lib/media";
 import { formatDate } from "@/lib/dates";
 import { signedUrls } from "@/lib/files";
-import { ASSET_KINDS, assetKind, formatBytes, type AssetKind } from "@/lib/library";
+import { ASSET_KINDS, assetKind, CLIENT_FOLDER, formatBytes, type AssetKind } from "@/lib/library";
 import { Card, EmptyState, PageHeader } from "@/components/ui";
-import { StatusBadge } from "@/components/status-badge";
 import { AssetGrid, type AssetView } from "@/components/library/asset-grid";
 import { LibraryUploader } from "@/components/library/library-uploader";
 import { cn } from "@/lib/utils";
@@ -18,15 +16,14 @@ export const metadata: Metadata = { title: "Library" };
 
 
 /**
- * Everything for one client in one place: the files people upload (product
- * photos, videos, logos, documents) and, on a second tab, every photo and video
- * used in the client's posts.
+ * Everything for one client in one place: product photos, videos, logos and
+ * documents, in folders. The agency chooses the folder for its uploads; what a
+ * client uploads goes into its own "From the client" folder.
  */
 export default async function LibraryPage({ params, searchParams }: PageProps<"/w/[slug]/library">) {
   const [{ slug }, sp] = await Promise.all([params, searchParams]);
   const { workspace, can } = await getWorkspaceAccess(slug);
   const base = `/w/${workspace.slug}/library`;
-  const tab = sp.tab === "posts" ? "posts" : "files";
   const type = (["photo", "video", "document"] as const).find((t) => t === sp.type) ?? null;
   const folder = typeof sp.folder === "string" ? sp.folder.slice(0, 60) : "";
   const q = typeof sp.q === "string" ? sp.q.trim().slice(0, 80) : "";
@@ -39,15 +36,12 @@ export default async function LibraryPage({ params, searchParams }: PageProps<"/
   const countOf = (kind: AssetKind) => all.filter((a) => assetKind(a.mime) === kind).length;
   const totalBytes = all.reduce((sum, a) => sum + Number(a.size || 0), 0);
 
-  const href = (next: { tab?: string; type?: string | null; folder?: string; q?: string }) => {
+  const href = (next: { type?: string | null; folder?: string; q?: string }) => {
     const params = new URLSearchParams();
-    const merged = { tab, type, folder, q, ...next };
-    if (merged.tab === "posts") params.set("tab", "posts");
-    else {
-      if (merged.type) params.set("type", merged.type);
-      if (merged.folder) params.set("folder", merged.folder);
-      if (merged.q) params.set("q", merged.q);
-    }
+    const merged = { type, folder, q, ...next };
+    if (merged.type) params.set("type", merged.type);
+    if (merged.folder) params.set("folder", merged.folder);
+    if (merged.q) params.set("q", merged.q);
     const query = params.toString();
     return query ? `${base}?${query}` : base;
   };
@@ -57,31 +51,14 @@ export default async function LibraryPage({ params, searchParams }: PageProps<"/
       <PageHeader
         title="Library"
         description={`Product photos, videos, logos and documents for ${workspace.name}, all in one place.`}
-        actions={can.uploadFiles && tab === "files" ? <LibraryUploader workspaceId={workspace.id} folders={folders} defaultFolder={folder || undefined} /> : null}
+        actions={
+          can.uploadFiles ? (
+            <LibraryUploader workspaceId={workspace.id} folders={folders} defaultFolder={folder || undefined} fixedFolder={can.isClient ? CLIENT_FOLDER : undefined} />
+          ) : null
+        }
       />
 
-      <nav className="flex gap-1 border-b border-line" aria-label="Library sections">
-        {[
-          { key: "files", label: "Files", count: all.length },
-          { key: "posts", label: "From posts", count: null },
-        ].map((t) => (
-          <Link
-            key={t.key}
-            href={href({ tab: t.key, type: null, folder: "", q: "" })}
-            aria-current={tab === t.key ? "page" : undefined}
-            className={cn(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition",
-              tab === t.key ? "border-accent text-ink" : "border-transparent text-muted hover:text-ink",
-            )}
-          >
-            {t.label}
-            {t.count !== null ? <span className="ml-1.5 text-xs text-muted tabular-nums">{t.count}</span> : null}
-          </Link>
-        ))}
-      </nav>
-
-      {tab === "files" ? (
-        <FilesTab
+      <FilesTab
           workspaceId={workspace.id}
           clientName={workspace.name}
           isAdmin={can.manageWorkspace}
@@ -94,9 +71,6 @@ export default async function LibraryPage({ params, searchParams }: PageProps<"/
           totalBytes={totalBytes}
           href={href}
         />
-      ) : (
-        <PostsTab workspaceId={workspace.id} slug={workspace.slug} isAgency={can.isAgency} />
-      )}
     </div>
   );
 }
@@ -234,71 +208,5 @@ async function FilesTab({
         </Card>
       )}
     </div>
-  );
-}
-
-/** Every photo and video used in this client's posts, newest first, linking to each post. */
-async function PostsTab({ workspaceId, slug, isAgency }: { workspaceId: string; slug: string; isAgency: boolean }) {
-  const supabase = await createClient();
-  const [{ data: posts }, { data: versions }] = await Promise.all([
-    supabase.from("content_items").select("id, title, status, client_decision, planned_at").eq("workspace_id", workspaceId).order("planned_at", { ascending: false, nullsFirst: false }).limit(80),
-    supabase.from("content_versions").select("content_item_id, version_number, media").eq("workspace_id", workspaceId).order("version_number", { ascending: false }),
-  ]);
-  // The latest version of each post that this person can see.
-  const latest = new Map<string, unknown>();
-  for (const v of versions ?? []) if (!latest.has(v.content_item_id)) latest.set(v.content_item_id, v.media);
-
-  const entries = (posts ?? []).flatMap((post) => parseMedia(latest.get(post.id)).map((file) => ({ post, file })));
-  const signed = await signMedia(entries.map((e) => e.file));
-  const bySource = new Map(signed.map((s) => [s.path ?? s.url, s]));
-  const tiles = entries
-    .map(({ post, file }) => ({ post, media: bySource.get(file.path ?? file.url) }))
-    .filter((t): t is { post: (typeof entries)[number]["post"]; media: NonNullable<typeof t.media> } => Boolean(t.media));
-
-  if (!tiles.length) {
-    return (
-      <Card>
-        <EmptyState title="No post media yet">
-          {isAgency ? "Photos and videos uploaded to posts will show here." : "Photos and videos from posts shared with you will show here."}
-        </EmptyState>
-      </Card>
-    );
-  }
-
-  return (
-    <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-      {tiles.map(({ post, media }, i) => (
-        <li key={`${post.id}-${i}`}>
-          <Link
-            href={`/w/${slug}/content/${post.id}`}
-            className="group block overflow-hidden rounded-xl border border-line bg-surface transition hover:border-line-strong hover:shadow-sm"
-          >
-            {media.kind === "image" ? (
-              <span className="block aspect-square overflow-hidden bg-sunken">
-                {/* eslint-disable-next-line @next/next/no-img-element -- signed storage URLs */}
-                <img src={media.src} alt="" loading="lazy" decoding="async" className="size-full object-cover transition duration-300 group-hover:scale-[1.03]" />
-              </span>
-            ) : media.kind === "video" ? (
-              <span className="relative block aspect-square overflow-hidden bg-ink">
-                <video src={`${media.src}#t=0.5`} muted playsInline preload="metadata" className="size-full object-cover" aria-hidden />
-                <span className="absolute inset-0 flex items-center justify-center">
-                  <span className="flex size-10 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-sm">
-                    <Play className="ml-0.5 size-4 fill-current" aria-hidden />
-                  </span>
-                </span>
-              </span>
-            ) : (
-              <span className="flex aspect-square items-center justify-center bg-sunken text-muted">
-                <FileText className="size-9" aria-hidden />
-              </span>
-            )}
-            <span className="block space-y-1 px-3 py-2.5">
-              <span className="block truncate text-[13px] font-medium text-ink">{post.title}</span>
-              <StatusBadge item={post} side={isAgency ? "agency" : "client"} className="text-[11px]" />
-            </span>
-          </Link>
-        </li>
-      ))}
-    </ul>
   );
 }

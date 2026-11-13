@@ -61,15 +61,7 @@ export function AnimatedNumber({ value, className }: { value: number; className?
 }
 
 /** A progress bar whose coloured segments grow in on load. */
-export function AnimatedBar({
-  segments,
-  className,
-  label,
-}: {
-  segments: { value: number; className: string }[];
-  className?: string;
-  label: string;
-}) {
+export function AnimatedBar({ segments, className, label }: { segments: { value: number; className: string }[]; className?: string; label: string }) {
   return (
     <div className={cn("flex h-2.5 overflow-hidden rounded-full bg-sunken", className)} role="img" aria-label={label}>
       {segments.map((s, i) => (
@@ -83,23 +75,25 @@ export function AnimatedBar({
   );
 }
 
-/** Friendly empty state with a tick that draws itself. */
-export function CaughtUp({ title, children }: { title: string; children?: ReactNode }) {
+/**
+ * Pictures for empty screens: 3D renders in the logo's graphite and ember
+ * (made with three.js from the brand paths, kept in public/empty).
+ */
+const EMPTY_ART = {
+  seal: "/empty/seal.webp",
+  envelope: "/empty/envelope.webp",
+  cards: "/empty/cards.webp",
+  calendar: "/empty/calendar.webp",
+} as const;
+export type EmptyArt = keyof typeof EMPTY_ART;
+
+/** Friendly empty state with a small 3D picture that drops into place. */
+export function CaughtUp({ title, art = "seal", children }: { title: string; art?: EmptyArt; children?: ReactNode }) {
   return (
     <div className="flex flex-col items-center px-4 py-8 text-center">
-      <svg viewBox="0 0 48 48" className="animate-pop-in size-12 text-emerald-600" aria-hidden>
-        <circle cx="24" cy="24" r="22" className="fill-emerald-50" />
-        <path
-          d="M15 24.5l6 6 12-13"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="3.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="animate-draw-check"
-        />
-      </svg>
-      <p className="mt-3 text-[15px] font-semibold text-ink">{title}</p>
+      {/* eslint-disable-next-line @next/next/no-img-element -- small static picture, already sized */}
+      <img src={EMPTY_ART[art]} alt="" width={96} height={96} decoding="async" className="animate-art-in size-24 select-none" draggable={false} />
+      <p className="mt-2 text-[15px] font-semibold text-ink">{title}</p>
       {children ? <div className="mt-1 max-w-xs text-sm text-muted">{children}</div> : null}
     </div>
   );

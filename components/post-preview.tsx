@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState, useTransition, type KeyboardEvent, type TouchEvent } from "react";
+import { useEffect, useRef, useState, useTransition, type KeyboardEvent, type TouchEvent } from "react";
+import { animate, useReducedMotion } from "motion/react";
 import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Film, ImageOff, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { reorderMedia, saveCaption } from "@/app/actions/content";
@@ -14,7 +15,17 @@ const keyOf = (m: SignedMedia) => m.path ?? m.url ?? m.src;
 /** "4:5", "1:1", "9:16"… for the common shapes, otherwise "1.33:1". */
 function ratioName({ w, h }: Size): string {
   const ratio = w / h;
-  const known: [number, string][] = [[1, "1:1"], [4 / 5, "4:5"], [3 / 4, "3:4"], [2 / 3, "2:3"], [9 / 16, "9:16"], [16 / 9, "16:9"], [1.91, "1.91:1"], [4 / 3, "4:3"], [3 / 2, "3:2"]];
+  const known: [number, string][] = [
+    [1, "1:1"],
+    [4 / 5, "4:5"],
+    [3 / 4, "3:4"],
+    [2 / 3, "2:3"],
+    [9 / 16, "9:16"],
+    [16 / 9, "16:9"],
+    [1.91, "1.91:1"],
+    [4 / 3, "4:3"],
+    [3 / 2, "3:2"],
+  ];
   const match = known.find(([r]) => Math.abs(r - ratio) < 0.02);
   return match ? match[1] : `${ratio.toFixed(2)}:1`;
 }
@@ -55,12 +66,41 @@ export function PostPreview({
   const [saving, startSaving] = useTransition();
   const [dragging, setDragging] = useState<number | null>(null);
   const touch = useRef<{ x: number; y: number } | null>(null);
+  const frame = useRef<HTMLDivElement>(null);
+  // Which way the last move went: 1 forward, -1 back, 0 for a reorder (no animation).
+  const flick = useRef(0);
+  const firstShown = useRef(true);
+  const reduce = useReducedMotion();
   const count = items.length;
   const at = Math.min(index, Math.max(count - 1, 0));
   const current = items[at];
   const size = current ? sizes[current.src] : undefined;
 
-  const go = (to: number) => setIndex(Math.min(count - 1, Math.max(0, to)));
+  const go = (to: number) => {
+    const next = Math.min(count - 1, Math.max(0, to));
+    if (next !== at) flick.current = next > at ? 1 : -1;
+    setIndex(next);
+  };
+
+  // Carousels: the next photo comes forward off the stack; going back, the earlier one drops in from the front.
+  useEffect(() => {
+    if (firstShown.current) {
+      firstShown.current = false;
+      return;
+    }
+    const dir = flick.current;
+    flick.current = 0;
+    const node = frame.current;
+    if (!node || !dir || reduce) return;
+    const controls = animate(
+      node,
+      dir > 0
+        ? { y: [-16, 0], scale: [0.93, 1], rotateX: [10, 0], opacity: [0.5, 1] }
+        : { y: [24, 0], scale: [1.03, 1], rotateX: [-6, 0], opacity: [0, 1] },
+      { type: "spring", stiffness: 340, damping: 30 },
+    );
+    return () => controls.stop();
+  }, [at, reduce]);
   const measured = (src: string, w: number, h: number) => {
     if (w && h) setSizes((s) => (s[src]?.w === w && s[src]?.h === h ? s : { ...s, [src]: { w, h } }));
   };
@@ -87,6 +127,7 @@ export function PostPreview({
     const before = items;
     const next = items.slice();
     next.splice(to, 0, ...next.splice(from, 1));
+    flick.current = 0;
     setItems(next);
     setIndex(to);
     startSaving(async () => {
@@ -109,81 +150,124 @@ export function PostPreview({
           <span className="text-xs">Media not uploaded yet</span>
         </div>
       ) : (
-        <div
-          className="relative overflow-hidden rounded-2xl border border-line bg-sunken outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
-          tabIndex={count > 1 ? 0 : -1}
-          role="group"
-          aria-roledescription="carousel"
-          aria-label={count > 1 ? `Photo ${at + 1} of ${count}` : "Post media"}
-          onKeyDown={onKey}
-          onTouchStart={onTouchStart}
-          onTouchEnd={onTouchEnd}
-        >
-          <div className="flex items-center justify-center">
-            {current.kind === "video" ? (
-              <video
-                key={current.src}
-                src={current.src}
-                controls
-                playsInline
-                preload="metadata"
-                className="max-h-[72vh] w-full"
-                onLoadedMetadata={(e) => measured(current.src, e.currentTarget.videoWidth, e.currentTarget.videoHeight)}
-              />
-            ) : current.kind === "image" ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                key={current.src}
-                src={current.src}
-                alt={count > 1 ? `Photo ${at + 1} of ${count}` : "Post image"}
-                className="max-h-[72vh] w-auto max-w-full select-none"
-                draggable={false}
-                ref={(el) => {
-                  if (el?.complete) measured(current.src, el.naturalWidth, el.naturalHeight);
-                }}
-                onLoad={(e) => measured(current.src, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
-              />
-            ) : (
-              <a href={current.src} className="flex aspect-[4/3] w-full items-center justify-center px-4 text-center text-sm text-ink underline">
-                {current.name}
-              </a>
+        <div className={cn("relative [perspective:1200px]", count > 1 && "mt-4")}>
+          {/* The next photos wait behind, like a stack of prints. */}
+          {count > 1
+            ? [2, 1].map((depth) => {
+                const m = items[at + depth];
+                if (!m) return null;
+                return (
+                  <div
+                    key={keyOf(m)}
+                    aria-hidden
+                    className="animate-fade-in pointer-events-none absolute inset-0 overflow-hidden rounded-2xl border border-line bg-sunken transition-[transform,opacity] duration-500 ease-out-expo"
+                    style={{
+                      transform: `translateY(${-depth * 8}px) scale(${1 - depth * 0.05})`,
+                      transformOrigin: "50% 0%",
+                      opacity: depth === 2 ? 0.75 : 1,
+                    }}
+                  >
+                    {m.kind === "image" ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={m.src} alt="" className="size-full object-cover" draggable={false} />
+                    ) : null}
+                    <span className="absolute inset-0 bg-ink/15" />
+                  </div>
+                );
+              })
+            : null}
+          <div
+            ref={frame}
+            className={cn(
+              "relative overflow-hidden rounded-2xl border border-line bg-sunken outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
+              count > 1 && "shadow-[0_14px_30px_-20px_rgb(29_27_22/0.45)]",
             )}
-          </div>
+            tabIndex={count > 1 ? 0 : -1}
+            role="group"
+            aria-roledescription="carousel"
+            aria-label={count > 1 ? `Photo ${at + 1} of ${count}` : "Post media"}
+            onKeyDown={onKey}
+            onTouchStart={onTouchStart}
+            onTouchEnd={onTouchEnd}
+          >
+            <div className="flex items-center justify-center">
+              {current.kind === "video" ? (
+                <video
+                  key={current.src}
+                  src={current.src}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  className="max-h-[72vh] w-full"
+                  onLoadedMetadata={(e) => measured(current.src, e.currentTarget.videoWidth, e.currentTarget.videoHeight)}
+                />
+              ) : current.kind === "image" ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={current.src}
+                  src={current.src}
+                  alt={count > 1 ? `Photo ${at + 1} of ${count}` : "Post image"}
+                  className="max-h-[72vh] w-auto max-w-full select-none"
+                  draggable={false}
+                  ref={(el) => {
+                    if (el?.complete) measured(current.src, el.naturalWidth, el.naturalHeight);
+                  }}
+                  onLoad={(e) => measured(current.src, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
+                />
+              ) : (
+                <a href={current.src} className="flex aspect-[4/3] w-full items-center justify-center px-4 text-center text-sm text-ink underline">
+                  {current.name}
+                </a>
+              )}
+            </div>
 
-          {count > 1 ? (
-            <>
-              {/* Click the left or right side of a photo to move (videos keep their own controls). */}
-              {current.kind === "image" ? (
-                <>
-                  <button type="button" tabIndex={-1} aria-hidden onClick={() => go(at - 1)} className={cn("absolute inset-y-0 left-0 w-1/2", at === 0 ? "cursor-default" : "cursor-w-resize")} />
-                  <button type="button" tabIndex={-1} aria-hidden onClick={() => go(at + 1)} className={cn("absolute inset-y-0 right-0 w-1/2", at === count - 1 ? "cursor-default" : "cursor-e-resize")} />
-                </>
-              ) : null}
-              {at > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => go(at - 1)}
-                  className="absolute top-1/2 left-2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 text-ink shadow-md transition hover:bg-white"
-                  aria-label="Previous photo"
-                >
-                  <ChevronLeft className="size-5" aria-hidden />
-                </button>
-              ) : null}
-              {at < count - 1 ? (
-                <button
-                  type="button"
-                  onClick={() => go(at + 1)}
-                  className="absolute top-1/2 right-2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 text-ink shadow-md transition hover:bg-white"
-                  aria-label="Next photo"
-                >
-                  <ChevronRight className="size-5" aria-hidden />
-                </button>
-              ) : null}
-              <span className="pointer-events-none absolute top-2 right-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white tabular-nums">
-                {at + 1} / {count}
-              </span>
-            </>
-          ) : null}
+            {count > 1 ? (
+              <>
+                {/* Click the left or right side of a photo to move (videos keep their own controls). */}
+                {current.kind === "image" ? (
+                  <>
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      aria-hidden
+                      onClick={() => go(at - 1)}
+                      className={cn("absolute inset-y-0 left-0 w-1/2", at === 0 ? "cursor-default" : "cursor-w-resize")}
+                    />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      aria-hidden
+                      onClick={() => go(at + 1)}
+                      className={cn("absolute inset-y-0 right-0 w-1/2", at === count - 1 ? "cursor-default" : "cursor-e-resize")}
+                    />
+                  </>
+                ) : null}
+                {at > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => go(at - 1)}
+                    className="absolute top-1/2 left-2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 text-ink shadow-md transition hover:bg-white"
+                    aria-label="Previous photo"
+                  >
+                    <ChevronLeft className="size-5" aria-hidden />
+                  </button>
+                ) : null}
+                {at < count - 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => go(at + 1)}
+                    className="absolute top-1/2 right-2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 text-ink shadow-md transition hover:bg-white"
+                    aria-label="Next photo"
+                  >
+                    <ChevronRight className="size-5" aria-hidden />
+                  </button>
+                ) : null}
+                <span className="pointer-events-none absolute top-2 right-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white tabular-nums">
+                  {at + 1} / {count}
+                </span>
+              </>
+            ) : null}
+          </div>
         </div>
       )}
 
@@ -229,7 +313,9 @@ export function PostPreview({
                     </span>
                   )}
                 </button>
-                <span className="pointer-events-none absolute -top-1 -left-1 flex size-4 items-center justify-center rounded-full bg-ink text-[9px] font-bold text-white tabular-nums">{i + 1}</span>
+                <span className="pointer-events-none absolute -top-1 -left-1 flex size-4 items-center justify-center rounded-full bg-ink text-[9px] font-bold text-white tabular-nums">
+                  {i + 1}
+                </span>
               </li>
             ))}
           </ol>
@@ -270,7 +356,17 @@ export function PostPreview({
 }
 
 /** The caption and hashtags, typed straight into the box under the preview. */
-function CaptionEditor({ itemId, caption, hashtags, hasPlatformCaptions }: { itemId: string; caption: string; hashtags: string; hasPlatformCaptions: boolean }) {
+function CaptionEditor({
+  itemId,
+  caption,
+  hashtags,
+  hasPlatformCaptions,
+}: {
+  itemId: string;
+  caption: string;
+  hashtags: string;
+  hasPlatformCaptions: boolean;
+}) {
   const [saved, setSaved] = useState({ caption, hashtags });
   const [text, setText] = useState(caption);
   const [tags, setTags] = useState(hashtags);
@@ -291,7 +387,9 @@ function CaptionEditor({ itemId, caption, hashtags, hasPlatformCaptions }: { ite
 
   return (
     <div className="mt-3 rounded-xl border border-line bg-surface p-3 focus-within:border-line-strong">
-      <label className="sr-only" htmlFor="inline-caption">Caption</label>
+      <label className="sr-only" htmlFor="inline-caption">
+        Caption
+      </label>
       <textarea
         id="inline-caption"
         value={text}
@@ -304,7 +402,9 @@ function CaptionEditor({ itemId, caption, hashtags, hasPlatformCaptions }: { ite
         placeholder="Write the caption…"
         className="block w-full resize-none bg-transparent text-[13px] leading-relaxed text-ink outline-none placeholder:text-faint"
       />
-      <label className="sr-only" htmlFor="inline-hashtags">Hashtags</label>
+      <label className="sr-only" htmlFor="inline-hashtags">
+        Hashtags
+      </label>
       <input
         id="inline-hashtags"
         value={tags}
@@ -313,7 +413,9 @@ function CaptionEditor({ itemId, caption, hashtags, hasPlatformCaptions }: { ite
         placeholder="#hashtags"
         className="mt-1.5 block w-full border-t border-line bg-transparent pt-2 text-[13px] text-[#00376b] outline-none placeholder:text-faint"
       />
-      {hasPlatformCaptions ? <p className="mt-2 text-xs text-muted">Instagram or Facebook has its own caption for this post. Change those under Edit.</p> : null}
+      {hasPlatformCaptions ? (
+        <p className="mt-2 text-xs text-muted">Instagram or Facebook has its own caption for this post. Change those under Edit.</p>
+      ) : null}
       {dirty ? (
         <div className="mt-2.5 flex items-center justify-end gap-2">
           <button

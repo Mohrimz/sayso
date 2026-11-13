@@ -1,11 +1,13 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { getSentStatus } from "@/lib/approved-work";
 import { requireAgency } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { getPeople } from "@/lib/queries";
 import { daysAgoIso } from "@/lib/dates";
 import { Card, CardHeader } from "@/components/ui";
 import { TaskList, type TaskView } from "@/components/task-list";
+import { SendWork } from "@/components/task-work";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Team board" };
@@ -35,11 +37,25 @@ export default async function TeamBoard({ searchParams }: PageProps<"/tasks">) {
     tasks.length
       ? supabase
           .from("task_submissions")
-          .select("task_id, decision, review_note, submitted_at")
-          .in("task_id", tasks.map((t) => t.id))
+          .select("task_id, decision, review_note, submitted_at, content_item_id, reviewed_at, submitted_by")
+          .in(
+            "task_id",
+            tasks.map((t) => t.id),
+          )
           .order("submitted_at", { ascending: false })
-      : Promise.resolve({ data: [] as { task_id: string; decision: string | null; review_note: string | null }[] }),
+      : Promise.resolve({
+          data: [] as {
+            task_id: string;
+            decision: string | null;
+            review_note: string | null;
+            content_item_id: string | null;
+            reviewed_at: string | null;
+            submitted_by: string | null;
+          }[],
+        }),
   ]);
+  // Approved work: whether it has gone to the client yet.
+  const sentStatus = await getSentStatus(supabase, rounds ?? []);
   // The latest round of submitted work for each task.
   const lastReview = new Map<string, { decision: string | null; note: string | null }>();
   for (const r of rounds ?? []) if (!lastReview.has(r.task_id)) lastReview.set(r.task_id, { decision: r.decision, note: r.review_note });
@@ -50,6 +66,11 @@ export default async function TeamBoard({ searchParams }: PageProps<"/tasks">) {
     workspaceName: wsById.get(t.workspace_id)?.name,
     workspaceSlug: wsById.get(t.workspace_id)?.slug,
     lastReview: lastReview.get(t.id) ?? null,
+    sentStatus: (() => {
+      const st = sentStatus.get(t.id);
+      const ws = wsById.get(t.workspace_id);
+      return st && ws ? { href: `/w/${ws.slug}/content/${st.postId}`, senderId: st.senderId, sent: st.sent } : null;
+    })(),
   });
   const columns = [
     { key: "todo", title: "To do" },
@@ -74,22 +95,42 @@ export default async function TeamBoard({ searchParams }: PageProps<"/tasks">) {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Team board</h1>
-          <p className="mt-1 text-sm text-muted">Tasks across all clients, grouped by status. Add tasks from a client&apos;s Tasks tab.</p>
+          <p className="mt-1 text-sm text-muted">
+            {isAdmin
+              ? "Tasks across all clients, grouped by status. Add tasks from a client's Tasks tab."
+              : "Tasks across your clients, grouped by status. Made something without a task? Use Send work."}
+          </p>
         </div>
+        {/* Team members can send work for review without a task on the board. */}
+        {!isAdmin ? <SendWork clients={(workspaces ?? []).map((w) => ({ id: w.id, name: w.name }))} /> : null}
         <div className="flex flex-wrap gap-2 text-[13px]">
           <div className="inline-flex rounded-lg border border-line bg-sunken p-0.5">
             {(["all", "mine"] as const).map((s) => (
-              <Link key={s} href={href({ scope: s })} className={cn("rounded-md px-2.5 py-1", scope === s ? "bg-surface font-medium shadow-sm" : "text-muted")}>
+              <Link
+                key={s}
+                href={href({ scope: s })}
+                className={cn("rounded-md px-2.5 py-1", scope === s ? "bg-surface font-medium shadow-sm" : "text-muted")}
+              >
                 {s === "all" ? "Everyone" : "Mine"}
               </Link>
             ))}
           </div>
           <div className="flex flex-wrap gap-1">
-            <Link href={href({ client: "" })} className={cn("rounded-full border px-2.5 py-1", !selected ? "border-ink bg-ink text-white" : "border-line-strong text-ink-soft")}>
+            <Link
+              href={href({ client: "" })}
+              className={cn("rounded-full border px-2.5 py-1", !selected ? "border-ink bg-ink text-white" : "border-line-strong text-ink-soft")}
+            >
               All clients
             </Link>
             {(workspaces ?? []).map((w) => (
-              <Link key={w.id} href={href({ client: w.slug })} className={cn("rounded-full border px-2.5 py-1", selected?.id === w.id ? "border-ink bg-ink text-white" : "border-line-strong text-ink-soft")}>
+              <Link
+                key={w.id}
+                href={href({ client: w.slug })}
+                className={cn(
+                  "rounded-full border px-2.5 py-1",
+                  selected?.id === w.id ? "border-ink bg-ink text-white" : "border-line-strong text-ink-soft",
+                )}
+              >
                 {w.name}
               </Link>
             ))}

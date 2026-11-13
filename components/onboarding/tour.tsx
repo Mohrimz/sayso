@@ -30,10 +30,10 @@ function stopsFor(slug: string, role: WorkspaceRole): Stop[] {
         ? "Every post planned for the month. When one is ready you'll get a notification and an email: open it, preview it, then approve it or ask for changes."
         : "Every post planned for the month. Open one to preview it exactly as it will appear.",
     },
-    { path: `${base}/chat`, title: "Chat", text: "Message the team directly. Type @ to mention someone, and attach photos or files." },
+    { path: `${base}/chat`, title: "Chat", text: "Message the whole team under Team chat, or just the agency admin under Direct. Type @ to mention someone, and attach photos or files." },
     { path: `${base}/tasks`, title: "Action items", text: "Things the team needs from you, like photos or answers. Tick each one off when it's done." },
     { path: `${base}/brand`, title: "Brand kit", text: "Your colours, fonts, tone of voice and approved answers. The team follows it for every post." },
-    { path: `${base}/library`, title: "Library", text: "Product photos, videos and files in one place. Download one, a few, or everything at once." },
+    { path: `${base}/library`, title: "Library", text: "Product photos, videos and files in one place. Download one, a few, or everything at once, and upload your own: they go into the From the client folder." },
     { path: `${base}/offers`, title: "Offers", text: "Got a sale, a discount or a launch coming up? Tell the team here, in your own words, so they can plan posts around it." },
     {
       path: `${base}/settings`,

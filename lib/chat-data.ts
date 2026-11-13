@@ -41,7 +41,9 @@ export async function loadChat(access: WorkspaceAccess, channel: ChatChannel): P
   const hasMore = (rows ?? []).length > CHAT_PAGE_SIZE;
   const messages = (rows ?? []).slice(0, CHAT_PAGE_SIZE).reverse().map(toChatMessage);
 
-  const clients = channel === "client" ? members.filter((m) => m.side === "client") : [];
+  // Who's in the conversation: the team chat has no clients, and the direct chat has no team members.
+  const clients = channel === "team" ? [] : members.filter((m) => m.side === "client");
+  const staff = channel === "direct" ? agency.filter((a) => a.isAdmin) : agency;
   const toChatPerson = (p: { id: string; name: string; side: ChatPerson["side"]; avatar: string | null; jobTitle: string | null }): ChatPerson => ({
     id: p.id,
     name: p.name,
@@ -49,7 +51,7 @@ export async function loadChat(access: WorkspaceAccess, channel: ChatChannel): P
     avatar: p.avatar,
     jobTitle: p.jobTitle,
   });
-  const roster: ChatPerson[] = [...clients.map(toChatPerson), ...agency.map(toChatPerson)];
+  const roster: ChatPerson[] = [...clients.map(toChatPerson), ...staff.map(toChatPerson)];
   const people: Record<string, ChatPerson> = Object.fromEntries(roster.map((p) => [p.id, p]));
 
   // Authors who are no longer on the roster (e.g. removed from the client).
@@ -58,11 +60,14 @@ export async function loadChat(access: WorkspaceAccess, channel: ChatChannel): P
     for (const [id, p] of await getPeople(missing)) people[id] = toChatPerson(p);
   }
 
+  // Read receipts ("Seen by") are for the agency only; row-level security also
+  // limits clients to their own marker.
+  const seesReceipts = access.viewer.side === "agency";
   const readers: Record<string, string> = {};
   let lastReadAt: string | null = null;
   for (const r of reads ?? []) {
     if (r.user_id === access.viewer.id) lastReadAt = r.last_read_at;
-    else readers[r.user_id] = r.last_read_at;
+    else if (seesReceipts) readers[r.user_id] = r.last_read_at;
   }
 
   const signed = await signChatFiles(messages.flatMap((m) => m.attachments.map((a) => a.path)),
