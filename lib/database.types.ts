@@ -219,14 +219,14 @@ isOneToOne: false
                   ]
                 },"content_items": {
                   Row: {
-                    "approval_deadline": string | null,"approved_at": string | null,"assignee_id": string | null,"captions": NonNullable<Json>,"client_decision": Database["public"]['Enums']["approval_decision"] | null,"created_at": string,"created_by": string | null,"current_version": number,"hashtags": string | null,"id": string,"link_url": string | null,"live_url": string | null,"on_screen_text": string | null,"plan_id": string,"planned_at": string | null,"platforms": (string)[],"publish_requested_at": string | null,"publish_requested_by": string | null,"published_at": string | null,"reviewer_id": string | null,"revision_count": number,"sent_for_approval_at": string | null,"status": Database["public"]['Enums']["content_status"],"tags": (string)[],"title": string,"tracked_links": NonNullable<Json>,"type": Database["public"]['Enums']["content_type"],"updated_at": string,"utm": NonNullable<Json>,"workspace_id": string
+                    "approval_deadline": string | null,"approved_at": string | null,"assignee_id": string | null,"captions": NonNullable<Json>,"client_decision": Database["public"]['Enums']["approval_decision"] | null,"cover": Json | null,"cover_frame_ms": number | null,"cover_set_at": string | null,"created_at": string,"created_by": string | null,"current_version": number,"hashtags": string | null,"id": string,"keep_on_plan": boolean,"link_url": string | null,"live_url": string | null,"on_screen_text": string | null,"plan_id": string,"planned_at": string | null,"platforms": (string)[],"publish_requested_at": string | null,"publish_requested_by": string | null,"published_at": string | null,"removed_at": string | null,"removed_from": string | null,"reviewer_id": string | null,"revision_count": number,"sent_for_approval_at": string | null,"status": Database["public"]['Enums']["content_status"],"tags": (string)[],"title": string,"tracked_links": NonNullable<Json>,"type": Database["public"]['Enums']["content_type"],"updated_at": string,"utm": NonNullable<Json>,"workspace_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "approval_deadline"?: string | null,"approved_at"?: string | null,"assignee_id"?: string | null,"captions"?: NonNullable<Json>,"client_decision"?: Database["public"]['Enums']["approval_decision"] | null,"created_at"?: string,"created_by"?: string | null,"current_version"?: number,"hashtags"?: string | null,"id"?: string,"link_url"?: string | null,"live_url"?: string | null,"on_screen_text"?: string | null,"plan_id": string,"planned_at"?: string | null,"platforms"?: (string)[],"publish_requested_at"?: string | null,"publish_requested_by"?: string | null,"published_at"?: string | null,"reviewer_id"?: string | null,"revision_count"?: number,"sent_for_approval_at"?: string | null,"status"?: Database["public"]['Enums']["content_status"],"tags"?: (string)[],"title": string,"tracked_links"?: NonNullable<Json>,"type": Database["public"]['Enums']["content_type"],"updated_at"?: string,"utm"?: NonNullable<Json>,"workspace_id": string
+                    "approval_deadline"?: string | null,"approved_at"?: string | null,"assignee_id"?: string | null,"captions"?: NonNullable<Json>,"client_decision"?: Database["public"]['Enums']["approval_decision"] | null,"cover"?: Json | null,"cover_frame_ms"?: number | null,"cover_set_at"?: string | null,"created_at"?: string,"created_by"?: string | null,"current_version"?: number,"hashtags"?: string | null,"id"?: string,"keep_on_plan"?: boolean,"link_url"?: string | null,"live_url"?: string | null,"on_screen_text"?: string | null,"plan_id": string,"planned_at"?: string | null,"platforms"?: (string)[],"publish_requested_at"?: string | null,"publish_requested_by"?: string | null,"published_at"?: string | null,"removed_at"?: string | null,"removed_from"?: string | null,"reviewer_id"?: string | null,"revision_count"?: number,"sent_for_approval_at"?: string | null,"status"?: Database["public"]['Enums']["content_status"],"tags"?: (string)[],"title": string,"tracked_links"?: NonNullable<Json>,"type": Database["public"]['Enums']["content_type"],"updated_at"?: string,"utm"?: NonNullable<Json>,"workspace_id": string
                   }
                   Update: {
-                    "approval_deadline"?: string | null,"approved_at"?: string | null,"assignee_id"?: string | null,"captions"?: NonNullable<Json>,"client_decision"?: Database["public"]['Enums']["approval_decision"] | null,"created_at"?: string,"created_by"?: string | null,"current_version"?: number,"hashtags"?: string | null,"id"?: string,"link_url"?: string | null,"live_url"?: string | null,"on_screen_text"?: string | null,"plan_id"?: string,"planned_at"?: string | null,"platforms"?: (string)[],"publish_requested_at"?: string | null,"publish_requested_by"?: string | null,"published_at"?: string | null,"reviewer_id"?: string | null,"revision_count"?: number,"sent_for_approval_at"?: string | null,"status"?: Database["public"]['Enums']["content_status"],"tags"?: (string)[],"title"?: string,"tracked_links"?: NonNullable<Json>,"type"?: Database["public"]['Enums']["content_type"],"updated_at"?: string,"utm"?: NonNullable<Json>,"workspace_id"?: string
+                    "approval_deadline"?: string | null,"approved_at"?: string | null,"assignee_id"?: string | null,"captions"?: NonNullable<Json>,"client_decision"?: Database["public"]['Enums']["approval_decision"] | null,"cover"?: Json | null,"cover_frame_ms"?: number | null,"cover_set_at"?: string | null,"created_at"?: string,"created_by"?: string | null,"current_version"?: number,"hashtags"?: string | null,"id"?: string,"keep_on_plan"?: boolean,"link_url"?: string | null,"live_url"?: string | null,"on_screen_text"?: string | null,"plan_id"?: string,"planned_at"?: string | null,"platforms"?: (string)[],"publish_requested_at"?: string | null,"publish_requested_by"?: string | null,"published_at"?: string | null,"removed_at"?: string | null,"removed_from"?: string | null,"reviewer_id"?: string | null,"revision_count"?: number,"sent_for_approval_at"?: string | null,"status"?: Database["public"]['Enums']["content_status"],"tags"?: (string)[],"title"?: string,"tracked_links"?: NonNullable<Json>,"type"?: Database["public"]['Enums']["content_type"],"updated_at"?: string,"utm"?: NonNullable<Json>,"workspace_id"?: string
                   }
                   Relationships: [
                     {
@@ -533,6 +533,26 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"push_devices": {
+                  Row: {
+                    "created_at": string,"platform": string,"token": string,"updated_at": string,"user_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"platform": string,"token": string,"updated_at"?: string,"user_id": string
+                  }
+                  Update: {
+                    "created_at"?: string,"platform"?: string,"token"?: string,"updated_at"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "push_devices_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"task_submissions": {
                   Row: {
                     "content_item_id": string | null,"decision": string | null,"files": NonNullable<Json>,"id": string,"note": string | null,"review_note": string | null,"reviewed_at": string | null,"reviewed_by": string | null,"submitted_at": string,"submitted_by": string | null,"task_id": string,"version_id": string | null,"workspace_id": string
@@ -675,14 +695,14 @@ isOneToOne: false
                   ]
                 },"workspaces": {
                   Row: {
-                    "approval_rule": Database["public"]['Enums']["approval_rule"],"baseline": NonNullable<Json>,"created_at": string,"facebook_page_id": string | null,"goals_focus": string | null,"id": string,"instagram_account_id": string | null,"logo_path": string | null,"main_contact_email": string | null,"main_contact_name": string | null,"name": string,"quotas": NonNullable<Json>,"revision_rounds": number,"rules": NonNullable<Json>,"slug": string,"social_accounts": NonNullable<Json>,"status": Database["public"]['Enums']["workspace_status"],"success_measures": string | null,"time_zone": string,"updated_at": string,"website": string | null
+                    "approval_rule": Database["public"]['Enums']["approval_rule"],"baseline": NonNullable<Json>,"created_at": string,"facebook_page_id": string | null,"goals_focus": string | null,"id": string,"instagram_account_id": string | null,"logo_path": string | null,"main_contact_email": string | null,"main_contact_name": string | null,"name": string,"posts_checked_at": string | null,"quotas": NonNullable<Json>,"revision_rounds": number,"rules": NonNullable<Json>,"slug": string,"social_accounts": NonNullable<Json>,"status": Database["public"]['Enums']["workspace_status"],"success_measures": string | null,"time_zone": string,"updated_at": string,"website": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "approval_rule"?: Database["public"]['Enums']["approval_rule"],"baseline"?: NonNullable<Json>,"created_at"?: string,"facebook_page_id"?: string | null,"goals_focus"?: string | null,"id"?: string,"instagram_account_id"?: string | null,"logo_path"?: string | null,"main_contact_email"?: string | null,"main_contact_name"?: string | null,"name": string,"quotas"?: NonNullable<Json>,"revision_rounds"?: number,"rules"?: NonNullable<Json>,"slug": string,"social_accounts"?: NonNullable<Json>,"status"?: Database["public"]['Enums']["workspace_status"],"success_measures"?: string | null,"time_zone"?: string,"updated_at"?: string,"website"?: string | null
+                    "approval_rule"?: Database["public"]['Enums']["approval_rule"],"baseline"?: NonNullable<Json>,"created_at"?: string,"facebook_page_id"?: string | null,"goals_focus"?: string | null,"id"?: string,"instagram_account_id"?: string | null,"logo_path"?: string | null,"main_contact_email"?: string | null,"main_contact_name"?: string | null,"name": string,"posts_checked_at"?: string | null,"quotas"?: NonNullable<Json>,"revision_rounds"?: number,"rules"?: NonNullable<Json>,"slug": string,"social_accounts"?: NonNullable<Json>,"status"?: Database["public"]['Enums']["workspace_status"],"success_measures"?: string | null,"time_zone"?: string,"updated_at"?: string,"website"?: string | null
                   }
                   Update: {
-                    "approval_rule"?: Database["public"]['Enums']["approval_rule"],"baseline"?: NonNullable<Json>,"created_at"?: string,"facebook_page_id"?: string | null,"goals_focus"?: string | null,"id"?: string,"instagram_account_id"?: string | null,"logo_path"?: string | null,"main_contact_email"?: string | null,"main_contact_name"?: string | null,"name"?: string,"quotas"?: NonNullable<Json>,"revision_rounds"?: number,"rules"?: NonNullable<Json>,"slug"?: string,"social_accounts"?: NonNullable<Json>,"status"?: Database["public"]['Enums']["workspace_status"],"success_measures"?: string | null,"time_zone"?: string,"updated_at"?: string,"website"?: string | null
+                    "approval_rule"?: Database["public"]['Enums']["approval_rule"],"baseline"?: NonNullable<Json>,"created_at"?: string,"facebook_page_id"?: string | null,"goals_focus"?: string | null,"id"?: string,"instagram_account_id"?: string | null,"logo_path"?: string | null,"main_contact_email"?: string | null,"main_contact_name"?: string | null,"name"?: string,"posts_checked_at"?: string | null,"quotas"?: NonNullable<Json>,"revision_rounds"?: number,"rules"?: NonNullable<Json>,"slug"?: string,"social_accounts"?: NonNullable<Json>,"status"?: Database["public"]['Enums']["workspace_status"],"success_measures"?: string | null,"time_zone"?: string,"updated_at"?: string,"website"?: string | null
                   }
                   Relationships: [
                     
@@ -695,6 +715,9 @@ isOneToOne: false
           Functions: {
             "add_assistant_usage":
 { Args: { "p_cost": number,"p_user": string }; Returns: number
+                           },
+"agency_admins":
+{ Args: Record<PropertyKey, never>; Returns: (string)[]
                            },
 "agency_recipients":
 { Args: { "p_item": string }; Returns: (string)[]
@@ -718,6 +741,9 @@ isOneToOne: false
 { Args: Record<PropertyKey, never>; Returns: {
               "channel": Database["public"]['Enums']["chat_channel"],"last_at": string,"last_author": string,"last_body": string,"last_deleted": boolean,"last_files": number,"unread": number,"workspace_id": string
             }[]
+                           },
+"client_people":
+{ Args: { "p_ws": string }; Returns: (string)[]
                            },
 "delete_message":
 { Args: { "p_id": string }; Returns: Json
@@ -770,8 +796,14 @@ isOneToOne: false
 "profile_missing":
 { Args: { "p": Omit<Database["public"]['Tables']["profiles"]['Row'], Database["public"]['Tables']["profiles"]['ComputedFields']> }; Returns: (string)[]
                            },
+"register_push_device":
+{ Args: { "p_platform": string,"p_token": string }; Returns: undefined
+                           },
 "reorder_post_media":
 { Args: { "p_item": string,"p_keys": (string)[] }; Returns: undefined
+                           },
+"replace_sent_version":
+{ Args: { "p_files": Json,"p_item": string,"p_note"?: string }; Returns: string
                            },
 "request_publish":
 { Args: { "p_item": string }; Returns: undefined
@@ -783,6 +815,9 @@ isOneToOne: false
 { Args: { "p_deadline"?: string,"p_item": string }; Returns: string
                            },
 "send_for_approval":
+{ Args: { "p_deadline"?: string,"p_item": string }; Returns: string
+                           },
+"send_to_client":
 { Args: { "p_deadline"?: string,"p_item": string }; Returns: string
                            },
 "set_client_task_status":
@@ -808,6 +843,9 @@ isOneToOne: false
                            },
 "workspace_slug":
 { Args: { "p_ws": string }; Returns: string
+                           },
+"workspace_team":
+{ Args: { "p_ws": string }; Returns: (string)[]
                            }
           }
           Enums: {

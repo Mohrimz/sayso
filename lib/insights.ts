@@ -274,10 +274,10 @@ export function insightFor(key: string, audience: Audience): Insight {
             title: "Content item",
             summary: "One post from plan to publish. The bar at the top shows which stage it's at.",
             points: [
-              ["Upload media", "every upload is kept as a version, so nothing is lost."],
+              ["Upload media", "every upload is kept as a version, so nothing is lost. A new version of a post the client is reviewing goes to them straight away."],
               audience === "team_member"
-                ? ["Send for review", "an admin checks it and sends it to the client. They get a notification."]
-                : ["Internal review", "you check it, then send it to the client. Only admins can send posts to the client."],
+                ? ["Send to client", "when it's ready, send it straight to the client. The admins get a notification."]
+                : ["Send to client", "anyone on the team can send a post to the client. You're told when a team member does."],
               ["After approval", "mark it scheduled, then published with the live link."],
               ["Delete", "any post that isn't published yet."],
               ["Internal notes", "never shown to the client."],

@@ -386,6 +386,8 @@ export function ChatRoom({
     const known = rowsRef.current.some((r) => r.id === message.id);
     setRows((current) => upsert(current, message));
     if (event === "INSERT" && !known && authorId !== viewer.id) {
+      // Writing a message means they've seen everything before it.
+      noteSeen(authorId, message.created_at);
       if (!nearBottom.current) setNewBelow((n) => n + 1);
       if (authorId) {
         setTyping((current) => {
@@ -401,11 +403,33 @@ export function ChatRoom({
     void ensureSigned(message.attachments);
   });
 
+  // Read receipts are for the agency only (clients don't receive them anyway).
+  // Each person keeps the newest time we know they had this chat open.
+  const noteSeen = useEffectEvent((id: unknown, at: unknown) => {
+    if (!viewer.isAgency || typeof id !== "string" || id === viewer.id || typeof at !== "string" || !at) return;
+    setReaders((current) => (current[id] && Date.parse(current[id]) >= Date.parse(at) ? current : { ...current, [id]: at }));
+  });
+
   const receiveRead = useEffectEvent((raw: Record<string, unknown>) => {
-    // Read receipts are for the agency only (clients don't receive them anyway).
+    if (raw.channel !== channel) return;
+    noteSeen(raw.user_id, raw.last_read_at == null ? null : String(raw.last_read_at));
+  });
+
+  /** Reads everyone's read markers again, in case a live update was missed. */
+  const refreshReaders = useEffectEvent(async () => {
     if (!viewer.isAgency) return;
-    if (raw.channel !== channel || raw.user_id === viewer.id || typeof raw.user_id !== "string") return;
-    setReaders((current) => ({ ...current, [raw.user_id as string]: String(raw.last_read_at) }));
+    const { data } = await createClient()
+      .from("chat_reads")
+      .select("user_id, last_read_at")
+      .eq("workspace_id", workspace.id)
+      .eq("channel", channel);
+    for (const r of data ?? []) noteSeen(r.user_id, r.last_read_at);
+  });
+
+  /** Someone typing here has the chat open, so they've seen what's in it. */
+  const seenByTyping = useEffectEvent((id: string) => {
+    const newest = [...rowsRef.current].reverse().find((r) => !r.pending && !r.failed);
+    if (newest) noteSeen(id, newest.created_at);
   });
 
   /** Fetches anything missed while the connection was down or the tab asleep. */
@@ -421,6 +445,7 @@ export function ChatRoom({
     if (newest) query = query.gt("created_at", newest.created_at);
     const { data } = await query;
     for (const raw of data ?? []) receive({ ...raw, channel }, "INSERT");
+    void refreshReaders();
   });
 
   // Database changes: new messages, deletions and read markers.
@@ -464,6 +489,7 @@ export function ChatRoom({
       ch.on("broadcast", { event: "typing" }, ({ payload }) => {
         const id = typeof payload?.id === "string" ? payload.id : null;
         if (!id || id === viewer.id) return;
+        if (!payload.stop) seenByTyping(id);
         setTyping((current) => {
           const next = { ...current };
           if (payload.stop) delete next[id];
@@ -513,9 +539,14 @@ export function ChatRoom({
     };
     document.addEventListener("visibilitychange", onVisible);
     const heartbeat = setInterval(() => markRead(), 60_000);
+    // "Seen by" catches up on its own even if a live update never arrives.
+    const readsCheck = setInterval(() => {
+      if (document.visibilityState === "visible") void refreshReaders();
+    }, 20_000);
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
       clearInterval(heartbeat);
+      clearInterval(readsCheck);
       if (readTimer.current) clearTimeout(readTimer.current);
     };
   }, []);

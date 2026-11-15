@@ -54,8 +54,9 @@ export default async function WorkspaceTasks({ params }: PageProps<"/w/[slug]/ta
   // Approved work: whether it has gone to the client yet (agency only).
   const sentStatus = await getSentStatus(supabase, rounds ?? []);
   // The latest round of submitted work for each task (agency only).
-  const lastReview = new Map<string, { decision: string | null; note: string | null }>();
-  for (const r of rounds ?? []) if (!lastReview.has(r.task_id)) lastReview.set(r.task_id, { decision: r.decision, note: r.review_note });
+  const lastReview = new Map<string, { decision: string | null; note: string | null; by: string | null }>();
+  for (const r of rounds ?? [])
+    if (!lastReview.has(r.task_id)) lastReview.set(r.task_id, { decision: r.decision, note: r.review_note, by: r.submitted_by });
   const view = (t: (typeof tasks)[number]): TaskView => ({
     ...t,
     ownerName: t.owner_id ? people.get(t.owner_id)?.name : null,

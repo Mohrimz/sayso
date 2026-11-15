@@ -137,7 +137,7 @@ function outputsOf(body: MakeBody | null) {
  */
 export async function publishTo(
   platform: PublishPlatform,
-  input: { kind: PublishKind; accountId: string; caption: string; files: PublishFile[] },
+  input: { kind: PublishKind; accountId: string; caption: string; files: PublishFile[]; coverFrameMs?: number | null },
 ): Promise<PublishOutcome> {
   if (!publishingConfigured()) return { ok: false, error: "Publishing isn't set up on this site yet." };
   const zone = process.env.MAKE_ZONE || "eu1.make.com";
@@ -145,7 +145,7 @@ export async function publishTo(
 
   const image = input.files.find((f) => f.mime.startsWith("image/"));
   const video = input.files.find((f) => f.mime.startsWith("video/"));
-  const data: Record<string, string> = {
+  const data: Record<string, string | number> = {
     platform,
     kind: input.kind,
     caption: input.caption,
@@ -153,6 +153,8 @@ export async function publishTo(
   };
   if (image) data.image_url = image.url;
   if (video) data.video_url = video.url;
+  // Instagram reels: the moment in the video to use as the cover (milliseconds).
+  if (platform === "instagram" && input.kind === "reel" && typeof input.coverFrameMs === "number") data.thumb_offset = input.coverFrameMs;
   if (input.kind === "carousel" || (platform === "facebook" && input.kind === "photo")) {
     data.payload = JSON.stringify({
       files: input.files.map((f) =>

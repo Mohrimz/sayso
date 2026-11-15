@@ -73,8 +73,10 @@ export async function publishNow(_: ActionState, fd: FormData): Promise<ActionSt
         await publishTo(target.platform, {
           kind: plan.kind,
           accountId: target.accountId,
-          caption: publishCaption(version.captions, version.hashtags, target.platform),
+          // The post's caption: the approved one, plus any finishing touches made before publishing.
+          caption: publishCaption(item.captions, item.hashtags, target.platform),
           files,
+          coverFrameMs: plan.kind === "reel" ? item.cover_frame_ms : null,
         }),
       ]),
     );
@@ -102,6 +104,8 @@ export async function publishNow(_: ActionState, fd: FormData): Promise<ActionSt
     const notes = [
       ...failed.map(([t, o]) => `${NAMES[t.platform]} didn't go out: ${o.error}`),
       ...(plan.manual.length ? [`Post it on ${plan.manual.join(", ")} by hand.`] : []),
+      // Make can't send a custom cover: the post page shows how to set it.
+      ...(plan.kind === "reel" && item.cover ? ["Now set the cover: the steps are on the post."] : []),
     ];
     return done(`Published on ${where}.${notes.length ? ` ${notes.join(" ")}` : ""}`, failed.length ? { data: { warning: "1" } } : undefined);
   } finally {

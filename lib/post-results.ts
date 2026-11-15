@@ -85,7 +85,7 @@ export type FetchedResults =
 type Row = Record<string, unknown>;
 
 /** Runs the Make results scenario and returns its rows. */
-async function runScenario(data: Record<string, string>): Promise<{ rows: Row[] } | { error: string }> {
+export async function runScenario(data: Record<string, string>): Promise<{ rows: Row[] } | { error: string }> {
   if (!resultsConfigured()) return { error: "Results aren't set up yet." };
   const zone = process.env.MAKE_ZONE || "eu1.make.com";
   try {

@@ -85,13 +85,29 @@ export function monthLabel(month: string): string {
   );
 }
 
-/** Days of the month grid (Monday first), including leading/trailing days. */
-export function monthGrid(month: string): { key: string; day: number; inMonth: boolean }[] {
+/** Each month's plan ends on the 4th of the next month (and the next one starts on the 5th). */
+export const PLAN_END_DAY = 4;
+
+/** A month's plan period as day keys: "2026-11" runs from "2026-11-05" to "2026-12-04". */
+export function planPeriod(month: string): { start: string; end: string } {
+  return { start: `${month}-${pad(PLAN_END_DAY + 1)}`, end: `${shiftMonth(month, 1)}-${pad(PLAN_END_DAY)}` };
+}
+
+/**
+ * Days of the month grid (Monday first), including leading/trailing days.
+ * With `through` (a day key after the month), the grid runs on to that day's week.
+ */
+export function monthGrid(month: string, through?: string): { key: string; day: number; inMonth: boolean }[] {
   const [y, m] = month.split("-").map(Number);
   const first = new Date(Date.UTC(y, m - 1, 1));
   const lead = (first.getUTCDay() + 6) % 7;
   const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  const total = Math.ceil((lead + daysInMonth) / 7) * 7;
+  let extra = 0;
+  if (through && /^\d{4}-\d{2}-\d{2}$/.test(through)) {
+    const [ty, tm, td] = through.split("-").map(Number);
+    extra = Math.max(0, Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(y, m - 1, daysInMonth)) / 86_400_000));
+  }
+  const total = Math.ceil((lead + daysInMonth + extra) / 7) * 7;
   return Array.from({ length: total }, (_, i) => {
     const d = new Date(Date.UTC(y, m - 1, 1 - lead + i));
     return {

@@ -69,6 +69,7 @@ export async function setTaskStatus(_: ActionState, fd: FormData): Promise<Actio
         .eq("id", task.id)
     : await supabase.rpc("set_client_task_status", { p_task: task.id, p_status: status });
   if (error) return fail(friendlyError(error));
+  deliverNotificationsLater();
   refresh();
   return done();
 }

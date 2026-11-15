@@ -9,16 +9,7 @@ import { findWorkspaceAccess, requireViewer } from "@/lib/auth";
 import { zonedInputToIso } from "@/lib/dates";
 import { buildTrackedLinks, defaultUtm, isValidUrl } from "@/lib/utm";
 import { PLATFORMS } from "@/lib/content";
-import {
-  csv,
-  deliverNotificationsLater,
-  done,
-  fail,
-  friendlyError,
-  list,
-  optStr,
-  str,
-} from "@/lib/action-helpers";
+import { csv, deliverNotificationsLater, done, fail, friendlyError, list, optStr, str } from "@/lib/action-helpers";
 import type { ContentStatus, ContentType } from "@/lib/types";
 import type { MediaFile } from "@/lib/media";
 import type { ActionState } from "./types";
@@ -68,11 +59,7 @@ function readContentFields(fd: FormData, tz: string) {
   };
 }
 
-function trackingFor(
-  fields: ReturnType<typeof readContentFields>,
-  fd: FormData,
-  ctx: { workspaceSlug: string; month: string },
-) {
+function trackingFor(fields: ReturnType<typeof readContentFields>, fd: FormData, ctx: { workspaceSlug: string; month: string }) {
   const base = defaultUtm({ workspaceSlug: ctx.workspaceSlug, month: ctx.month, title: fields.title });
   const utm = {
     medium: str(fd, "utm_medium") || base.medium,
@@ -132,7 +119,11 @@ export async function updateContentItem(_: ActionState, fd: FormData): Promise<A
   const linkOrPlatformsSent = fields.link_url !== undefined || fields.platforms !== undefined;
   const tracking = linkOrPlatformsSent
     ? trackingFor(
-        { ...fields, link_url: fields.link_url !== undefined ? fields.link_url : ctx.item.link_url, platforms: fields.platforms ?? ctx.item.platforms },
+        {
+          ...fields,
+          link_url: fields.link_url !== undefined ? fields.link_url : ctx.item.link_url,
+          platforms: fields.platforms ?? ctx.item.platforms,
+        },
         fd,
         { workspaceSlug: ctx.access.workspace.slug, month: (plan?.month ?? "").slice(0, 7) },
       )
@@ -158,6 +149,15 @@ export async function addContentVersion(itemId: string, media: MediaFile[], note
     .map((m) => ({ path: m.path, name: String(m.name).slice(0, 200), mime: String(m.mime).slice(0, 100), size: Number(m.size) || 0 }));
   if (!clean.length) return fail("No files were uploaded.");
 
+  // With the client already: the new version goes to them straight away.
+  if (ctx.item.status === "client_review") {
+    const { error } = await ctx.supabase.rpc("replace_sent_version", { p_item: ctx.item.id, p_files: clean, p_note: note });
+    if (error) return fail(friendlyError(error));
+    deliverNotificationsLater();
+    refresh();
+    return done("New version sent to the client.");
+  }
+
   const { error } = await ctx.supabase.from("content_versions").insert({
     content_item_id: ctx.item.id,
     workspace_id: ctx.item.workspace_id,
@@ -179,7 +179,8 @@ export async function addContentVersion(itemId: string, media: MediaFile[], note
 export async function reorderMedia(itemId: string, keys: string[]): Promise<ActionState> {
   const ctx = await itemAccess(itemId);
   if (!ctx?.access.can.editContent) return fail("Only the agency team can change the order.");
-  if (!Array.isArray(keys) || keys.length < 2 || keys.length > 50 || keys.some((k) => typeof k !== "string")) return fail("That order couldn't be saved.");
+  if (!Array.isArray(keys) || keys.length < 2 || keys.length > 50 || keys.some((k) => typeof k !== "string"))
+    return fail("That order couldn't be saved.");
   const { error } = await ctx.supabase.rpc("reorder_post_media", { p_item: ctx.item.id, p_keys: keys });
   if (error) return fail(friendlyError(error));
   refresh();
@@ -190,8 +191,12 @@ export async function reorderMedia(itemId: string, keys: string[]): Promise<Acti
 export async function saveCaption(itemId: string, caption: string, hashtags: string): Promise<ActionState> {
   const ctx = await itemAccess(itemId);
   if (!ctx?.access.can.editContent) return fail("Only the agency team can edit the caption.");
-  if (typeof caption !== "string" || typeof hashtags !== "string" || caption.length > 5000 || hashtags.length > 1000) return fail("That caption is too long.");
-  const existing = ctx.item.captions && typeof ctx.item.captions === "object" && !Array.isArray(ctx.item.captions) ? (ctx.item.captions as Record<string, string>) : {};
+  if (typeof caption !== "string" || typeof hashtags !== "string" || caption.length > 5000 || hashtags.length > 1000)
+    return fail("That caption is too long.");
+  const existing =
+    ctx.item.captions && typeof ctx.item.captions === "object" && !Array.isArray(ctx.item.captions)
+      ? (ctx.item.captions as Record<string, string>)
+      : {};
   const { error } = await ctx.supabase
     .from("content_items")
     .update({ captions: { ...existing, default: caption.trim() }, hashtags: hashtags.trim() || null })
@@ -209,7 +214,7 @@ export async function moveContent(_: ActionState, fd: FormData): Promise<ActionS
   const to = str(fd, "to") as ContentStatus;
   if (!AGENCY_MOVES.includes(to)) return fail("That status can't be set here.");
   if ((to === "published" || ctx.item.status === "published") && !ctx.access.can.markPublished) {
-    return fail("Only an agency admin can publish posts. Use \"Request publishing\" instead.");
+    return fail('Only an agency admin can publish posts. Use "Request publishing" instead.');
   }
 
   const liveUrl = optStr(fd, "live_url");
@@ -231,7 +236,6 @@ export async function moveContent(_: ActionState, fd: FormData): Promise<ActionS
     scheduled: "Marked as scheduled",
     published: "Marked as published",
   };
-  if (to === "internal_review" && !ctx.access.can.sendToClient) return done("Sent for review. An admin will check it and send it to the client.");
   return done(messages[to]);
 }
 
@@ -250,7 +254,7 @@ export async function saveLiveUrl(_: ActionState, fd: FormData): Promise<ActionS
 export async function internalReview(_: ActionState, fd: FormData): Promise<ActionState> {
   const viewer = await requireViewer();
   const ctx = await itemAccess(str(fd, "item_id"));
-  if (!ctx?.access.can.sendToClient) return fail("Only an agency admin can review posts and send them to the client.");
+  if (!ctx?.access.can.manageWorkspace) return fail("Only an agency admin can review posts.");
   if (ctx.item.status !== "internal_review") return fail("This item isn't in internal review.");
   const decision = str(fd, "decision");
   const note = str(fd, "note");
@@ -292,6 +296,20 @@ export async function internalReview(_: ActionState, fd: FormData): Promise<Acti
   return done("Sent to the client for approval.");
 }
 
+/** Anyone on the agency team sends a post (draft or internal review) to the client. */
+export async function sendToClient(_: ActionState, fd: FormData): Promise<ActionState> {
+  await requireViewer();
+  const ctx = await itemAccess(str(fd, "item_id"));
+  if (!ctx?.access.can.sendToClient) return fail("Only the agency team can send posts to the client.");
+  const deadlineLocal = str(fd, "deadline");
+  const deadline = deadlineLocal ? zonedInputToIso(deadlineLocal, ctx.access.workspace.time_zone) : null;
+  const { error } = await ctx.supabase.rpc("send_to_client", { p_item: ctx.item.id, ...(deadline ? { p_deadline: deadline } : {}) });
+  if (error) return fail(friendlyError(error));
+  deliverNotificationsLater();
+  refresh();
+  return done("Sent to the client for approval.");
+}
+
 /** The team member whose task work an admin marked done sends the post to the client. */
 export async function sendApprovedWork(_: ActionState, fd: FormData): Promise<ActionState> {
   await requireViewer();
@@ -326,9 +344,7 @@ export async function submitApproval(_: ActionState, fd: FormData): Promise<Acti
   deliverNotificationsLater();
   refresh();
   if (decision === "changes_requested") return done("Thanks. The team has your notes and will send a new version.");
-  return done(
-    status === "approved" ? "Approved. Thank you!" : "Your approval is recorded. Waiting for the other approvers.",
-  );
+  return done(status === "approved" ? "Approved. Thank you!" : "Your approval is recorded. Waiting for the other approvers.");
 }
 
 export async function addComment(_: ActionState, fd: FormData): Promise<ActionState> {
@@ -396,7 +412,9 @@ export async function deleteContentItem(_: ActionState, fd: FormData): Promise<A
   // Remove the post's files, except work submitted on tasks (it stays in the task's history),
   // and the notifications that pointed at it.
   const paths = (rows: { media?: unknown; files?: unknown }[] | null, key: "media" | "files") =>
-    (rows ?? []).flatMap((r) => (Array.isArray(r[key]) ? (r[key] as { path?: unknown }[]) : [])).flatMap((m) => (typeof m?.path === "string" ? [m.path] : []));
+    (rows ?? [])
+      .flatMap((r) => (Array.isArray(r[key]) ? (r[key] as { path?: unknown }[]) : []))
+      .flatMap((m) => (typeof m?.path === "string" ? [m.path] : []));
   const keep = new Set(paths(submissions, "files"));
   const prefix = `${ctx.item.workspace_id}/${ctx.item.id}/`;
   const remove = paths(versions, "media").filter((p) => p.startsWith(prefix) && !keep.has(p));
@@ -409,4 +427,111 @@ export async function deleteContentItem(_: ActionState, fd: FormData): Promise<A
       .then(({ error: e }) => e && console.error("[content] notifications not removed", e)),
   ]);
   redirect(`/w/${ctx.access.workspace.slug}/plan/${(plan?.month ?? "").slice(0, 7)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Reel covers: an image shown with the post (set in Instagram and Facebook after
+// publishing) and the frame Instagram uses as the cover when Sayso publishes.
+// They can change right up to publishing without another approval.
+// ---------------------------------------------------------------------------
+
+const COVER_MAX_BYTES = 20 * 1024 * 1024;
+
+async function coverAccess(itemId: string) {
+  const ctx = await itemAccess(itemId);
+  if (!ctx?.access.can.editContent) return { error: "Only the agency team can change the cover." } as const;
+  if (ctx.item.type !== "reel") return { error: "Covers are for reels." } as const;
+  return ctx;
+}
+
+/** Sets, replaces or removes the cover image. The previous file is deleted. */
+export async function setReelCover(itemId: string, cover: MediaFile | null): Promise<ActionState> {
+  const ctx = await coverAccess(itemId);
+  if ("error" in ctx) return fail(ctx.error ?? "Not allowed.");
+  if (ctx.item.status === "published" && cover) return fail("This reel is already live. Change its cover in Instagram or Facebook.");
+  if (cover) {
+    const prefix = `${ctx.item.workspace_id}/${ctx.item.id}/cover/`;
+    if (!cover.path?.startsWith(prefix) || cover.path.includes("..")) return fail("That file can't be used as the cover.");
+    if (!cover.mime?.startsWith("image/")) return fail("The cover must be an image (JPG or PNG).");
+    if ((cover.size ?? 0) > COVER_MAX_BYTES) return fail("The cover can be up to 20 MB.");
+  }
+  const previous = (ctx.item.cover as MediaFile | null)?.path;
+  const next = cover ? { path: cover.path, name: cover.name.slice(0, 200), mime: cover.mime, size: cover.size ?? null } : null;
+  const { error } = await ctx.supabase.from("content_items").update({ cover: next, cover_set_at: null }).eq("id", ctx.item.id);
+  if (error) return fail(friendlyError(error));
+  if (previous && previous !== cover?.path) await removeFiles("content-media", [previous]).catch(() => {});
+  refresh();
+  return done(cover ? "Cover saved." : "Cover removed.");
+}
+
+/** The moment in the video Instagram uses as the cover when Sayso publishes it. */
+export async function setCoverFrame(itemId: string, ms: number | null): Promise<ActionState> {
+  const ctx = await coverAccess(itemId);
+  if ("error" in ctx) return fail(ctx.error ?? "Not allowed.");
+  if (ctx.item.status === "published") return fail("This reel is already live.");
+  const value = ms === null ? null : Math.round(Number(ms));
+  if (value !== null && (!Number.isFinite(value) || value < 0 || value > 900_000)) return fail("Pick a moment inside the video.");
+  const { error } = await ctx.supabase.from("content_items").update({ cover_frame_ms: value }).eq("id", ctx.item.id);
+  if (error) return fail(friendlyError(error));
+  refresh();
+  return done(value === null ? "Instagram will use the first frame." : "Cover frame saved.");
+}
+
+/** After publishing: the team set the cover in Instagram and Facebook. */
+export async function markCoverSet(itemId: string): Promise<ActionState> {
+  const ctx = await coverAccess(itemId);
+  if ("error" in ctx) return fail(ctx.error ?? "Not allowed.");
+  const { error } = await ctx.supabase.from("content_items").update({ cover_set_at: new Date().toISOString() }).eq("id", ctx.item.id);
+  if (error) return fail(friendlyError(error));
+  refresh();
+  return done("Thanks. The reminder is gone.");
+}
+
+// ---------------------------------------------------------------------------
+// Posts that are no longer on Instagram (see lib/post-removal).
+// ---------------------------------------------------------------------------
+
+/** Puts a post back on the plan, and stops Sayso flagging it again. */
+export async function restorePost(_: ActionState, fd: FormData): Promise<ActionState> {
+  const ctx = await itemAccess(str(fd, "item_id"));
+  if (!ctx?.access.can.editContent) return fail("Only the agency team can do that.");
+  const { error } = await ctx.supabase
+    .from("content_items")
+    .update({ removed_at: null, removed_from: null, keep_on_plan: true })
+    .eq("id", ctx.item.id);
+  if (error) return fail(friendlyError(error));
+  refresh();
+  return done("Back on the plan.");
+}
+
+/** Deletes a post that's no longer on Instagram, with its files. Agency admins only. */
+export async function deleteRemovedPost(_: ActionState, fd: FormData): Promise<ActionState> {
+  const ctx = await itemAccess(str(fd, "item_id"));
+  if (!ctx?.access.can.manageWorkspace) return fail("Only an agency admin can delete it for good.");
+  if (!ctx.item.removed_at) return fail("Only posts that are no longer on Instagram can be deleted here.");
+  const admin = createAdminClient();
+  const [{ data: versions }, { data: submissions }] = await Promise.all([
+    admin.from("content_versions").select("media").eq("content_item_id", ctx.item.id),
+    admin.from("task_submissions").select("files").eq("content_item_id", ctx.item.id),
+  ]);
+  const { error } = await admin.from("content_items").delete().eq("id", ctx.item.id);
+  if (error) return fail(friendlyError(error));
+  const paths = (rows: { media?: unknown; files?: unknown }[] | null, key: "media" | "files") =>
+    (rows ?? [])
+      .flatMap((r) => (Array.isArray(r[key]) ? (r[key] as { path?: unknown }[]) : []))
+      .flatMap((m) => (typeof m?.path === "string" ? [m.path] : []));
+  const keep = new Set(paths(submissions, "files"));
+  const prefix = `${ctx.item.workspace_id}/${ctx.item.id}/`;
+  const cover = (ctx.item.cover as MediaFile | null)?.path;
+  const remove = [...paths(versions, "media"), ...(cover ? [cover] : [])].filter((p) => p.startsWith(prefix) && !keep.has(p));
+  await Promise.all([
+    removeFiles("content-media", remove).catch((e) => console.error("[content] files not removed", e)),
+    admin
+      .from("notifications")
+      .delete()
+      .like("link", `%/content/${ctx.item.id}%`)
+      .then(({ error: e }) => e && console.error("[content] notifications not removed", e)),
+  ]);
+  refresh();
+  return done("Deleted.");
 }

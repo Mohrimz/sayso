@@ -27,7 +27,7 @@ export default async function WorkspaceHome({ params }: PageProps<"/w/[slug]">) 
 
   const plan = await getPlanByMonth(workspace.id, month);
   const [planItemsRes, awaitingRes, teamRes, tasksRes, updatesRes, commentsRes] = await Promise.all([
-    plan ? supabase.from("content_items").select("type, status").eq("plan_id", plan.id) : Promise.resolve({ data: [] }),
+    plan ? supabase.from("content_items").select("type, status").eq("plan_id", plan.id).is("removed_at", null) : Promise.resolve({ data: [] }),
     supabase.from("content_items").select(select).eq("workspace_id", workspace.id).eq("status", "client_review").order("approval_deadline"),
     can.isAgency
       ? supabase

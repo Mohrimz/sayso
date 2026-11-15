@@ -15,9 +15,9 @@ export function permissionsFor(role: WorkspaceRole) {
     managePlans: agency,
     editContent: agency,
     sendForApproval: agency,
-    // Agency admins check posts in internal review and send them to the client,
-    // and decide when the client sees a month. Team members send posts for review.
-    sendToClient: role === "admin",
+    // The whole agency team sends posts to the client (user, 2026-11-14).
+    // Only admins decide when the client sees a month.
+    sendToClient: agency,
     sharePlan: role === "admin",
     approve: role === "approver",
     comment: true,

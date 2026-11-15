@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { after } from "next/server";
 import { CheckCircle2, ChevronLeft, CircleAlert, Clock, ExternalLink, Hourglass, Link2, Send } from "lucide-react";
 import { getWorkspaceAccess } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
@@ -26,10 +27,13 @@ import { Sheet } from "@/components/sheet";
 import { StatusBadge } from "@/components/status-badge";
 import { Tabs, TabsContent } from "@/components/tabs";
 import { TypeIcon } from "@/components/type-icon";
-import { internalReview, moveContent, saveLiveUrl, sendApprovedWork, updateContentItem } from "@/app/actions/content";
+import { internalReview, moveContent, saveLiveUrl, sendApprovedWork, sendToClient, updateContentItem } from "@/app/actions/content";
 import { getApprovedWork } from "@/lib/approved-work";
 import { DeletePostButton } from "@/components/delete-post-button";
 import { PublishButton } from "@/components/publish-button";
+import { CoverReminder, ReelCover } from "@/components/reel-cover";
+import { checkRemovedPostsLater } from "@/lib/post-removal";
+import { restorePost } from "@/app/actions/content";
 import { requestPublish } from "@/app/actions/publish";
 import { publishPlan } from "@/lib/publish";
 import { cn } from "@/lib/utils";
@@ -46,6 +50,8 @@ export default async function ContentPage({ params, searchParams }: PageProps<"/
 
   const tz = workspace.time_zone;
   const base = `/w/${workspace.slug}`;
+  // Published: check (rarely, in the background) that it's still on Instagram.
+  if (item.status === "published" && !item.removed_at) after(() => checkRemovedPostsLater(workspace.id));
   const side = can.isAgency ? "agency" : "client";
 
   const [versionsRes, commentsRes, approvalsRes, notesRes, planRes, members, assignees] = await Promise.all([
@@ -77,7 +83,22 @@ export default async function ContentPage({ params, searchParams }: PageProps<"/
   const media = shown ? await signMedia(parseMedia(shown.media)) : [];
   // Published: the files that went out (the version sent to the client), for everyone here to download.
   const downloads = item.status === "published" && latestSent ? await mediaDownloads(parseMedia(latestSent.media)) : [];
-  const source = workingCopy || !shown ? item : shown;
+  // Approved and later: the post itself holds the latest caption (it can be finished until publishing).
+  const liveCopy = ["approved", "scheduled", "published"].includes(item.status) && Boolean(shown) && shown?.id === latestSent?.id;
+  const source = workingCopy || !shown || liveCopy ? item : shown;
+  // The caption can be edited in place until the post is published.
+  const captionEditable = can.editContent && liveCopy && item.status !== "published";
+
+  // Reels: the cover image (everyone here can see it) and the video for choosing Instagram's cover frame.
+  const coverFile = item.type === "reel" ? parseMedia(item.cover ? [item.cover] : [])[0] : undefined;
+  const [coverSigned, coverDownload] = coverFile
+    ? await Promise.all([signMedia([coverFile]).then((s) => s[0]), mediaDownloads([coverFile]).then((d) => d[0])])
+    : [];
+  const cover = coverSigned && coverDownload ? { src: coverSigned.src, download: coverDownload.url, name: coverDownload.name } : null;
+  const coverVideo =
+    item.type === "reel" && can.editContent && item.status !== "published"
+      ? ((latestSent && latestSent.id !== shown?.id ? await signMedia(parseMedia(latestSent.media)) : media).find((m) => m.kind === "video")?.src ?? null)
+      : null;
 
   const people = await getPeople([
     item.assignee_id,
@@ -124,18 +145,24 @@ export default async function ContentPage({ params, searchParams }: PageProps<"/
         icon: v.sent_to_client_at ? <Send className="size-3.5 text-blue-600" aria-hidden /> : <Clock className="size-3.5 text-muted" aria-hidden />,
         text: (
           <>
-            <span className="font-medium text-ink">Version {v.version_number}</span> {v.sent_to_client_at ? "sent for approval" : `uploaded by ${nameOf(v.created_by)}`}
+            <span className="font-medium text-ink">Version {v.version_number}</span>{" "}
+            {v.sent_to_client_at ? "sent for approval" : `uploaded by ${nameOf(v.created_by)}`}
           </>
         ),
       })),
     ...approvals.map((a) => ({
       at: a.created_at,
       key: `a-${a.id}`,
-      icon: a.decision === "approved" ? <CheckCircle2 className="size-3.5 text-green-700" aria-hidden /> : <CircleAlert className="size-3.5 text-orange-600" aria-hidden />,
+      icon:
+        a.decision === "approved" ? (
+          <CheckCircle2 className="size-3.5 text-green-700" aria-hidden />
+        ) : (
+          <CircleAlert className="size-3.5 text-orange-600" aria-hidden />
+        ),
       text: (
         <>
-          <span className="font-medium text-ink">{nameOf(a.approver_id)}</span> {a.decision === "approved" ? "approved" : "asked for changes on"} version{" "}
-          {versionNumber.get(a.version_id) ?? "?"}
+          <span className="font-medium text-ink">{nameOf(a.approver_id)}</span> {a.decision === "approved" ? "approved" : "asked for changes on"}{" "}
+          version {versionNumber.get(a.version_id) ?? "?"}
           {a.comment ? <span className="text-muted">: “{a.comment}”</span> : null}
         </>
       ),
@@ -185,7 +212,9 @@ export default async function ContentPage({ params, searchParams }: PageProps<"/
                   timeZone={tz}
                   month={month}
                   people={assignees}
-                  suggestedTags={[...new Set([...asArray<ApprovalRuleEntry>(workspace.rules).map((r) => r.tag), "AI-generated", "uses customer review"])]}
+                  suggestedTags={[
+                    ...new Set([...asArray<ApprovalRuleEntry>(workspace.rules).map((r) => r.tag), "AI-generated", "uses customer review"]),
+                  ]}
                   defaults={{
                     id: item.id,
                     title: item.title,
@@ -217,10 +246,10 @@ export default async function ContentPage({ params, searchParams }: PageProps<"/
               key={`${shown?.id ?? "none"}:${media.map((m) => m.path ?? m.url).join("|")}`}
               itemId={item.id}
               media={media}
-              caption={arranging ? captionFor(item.captions) : captionFor(source.captions, item.platforms[0])}
-              hashtags={arranging ? item.hashtags : source.hashtags}
+              caption={arranging || captionEditable ? captionFor(item.captions) : captionFor(source.captions, item.platforms[0])}
+              hashtags={arranging || captionEditable ? item.hashtags : source.hashtags}
               canArrange={arranging}
-              canEditCaption={arranging}
+              canEditCaption={arranging || captionEditable}
               hasPlatformCaptions={Object.keys(asObject<Record<string, string>>(item.captions)).some((k) => k !== "default")}
             />
           ) : (
@@ -231,6 +260,16 @@ export default async function ContentPage({ params, searchParams }: PageProps<"/
             </Card>
           )}
           {downloads.length ? <PostDownloads files={downloads} title={item.title} /> : null}
+          {item.type === "reel" ? (
+            <ReelCover
+              itemId={item.id}
+              workspaceId={workspace.id}
+              cover={cover}
+              frameMs={item.cover_frame_ms}
+              videoSrc={coverVideo}
+              canEdit={can.editContent && item.status !== "published"}
+            />
+          ) : null}
           {can.isAgency && versions.length > 1 ? (
             <nav className="flex flex-wrap items-center justify-center gap-1.5" aria-label="Versions">
               {versions
@@ -254,6 +293,26 @@ export default async function ContentPage({ params, searchParams }: PageProps<"/
         </FadeIn>
 
         <div className="min-w-0 space-y-6">
+          {can.isAgency && item.removed_at ? (
+            <Card className="border-amber-200 bg-amber-50/60 p-4">
+              <p className="text-sm font-semibold text-ink">Not on Instagram anymore</p>
+              <p className="mt-0.5 text-[13px] text-ink-soft">
+                It was deleted or archived on Instagram, so it&apos;s off the plan. Restore it if that&apos;s a mistake, and Sayso won&apos;t flag it again.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                <ActionForm action={restorePost}>
+                  <input type="hidden" name="item_id" value={item.id} />
+                  <SubmitButton size="sm" variant="secondary" pendingLabel="Restoring…">
+                    Restore to the plan
+                  </SubmitButton>
+                </ActionForm>
+                {can.manageWorkspace ? <DeletePostButton itemId={item.id} title={item.title} status={item.status} removed /> : null}
+              </div>
+            </Card>
+          ) : null}
+          {can.isAgency && item.type === "reel" && item.status === "published" && cover && !item.cover_set_at ? (
+            <CoverReminder itemId={item.id} cover={cover} />
+          ) : null}
           {item.status === "published" ? (
             <PostResultsCard
               itemId={item.id}
@@ -299,7 +358,7 @@ export default async function ContentPage({ params, searchParams }: PageProps<"/
                   : null
               }
               canPublish={can.markPublished}
-              canSendToClient={can.sendToClient}
+              isAdmin={can.manageWorkspace}
               approvedWork={
                 approvedWork
                   ? {
@@ -339,9 +398,10 @@ export default async function ContentPage({ params, searchParams }: PageProps<"/
                   resolved: c.resolved,
                   created_at: c.created_at,
                   version_number: c.version_id ? (versionNumber.get(c.version_id) ?? null) : null,
-                  author: c.author_id && people.get(c.author_id)
-                    ? { name: people.get(c.author_id)!.name, side: people.get(c.author_id)!.side, avatar: people.get(c.author_id)!.avatar }
-                    : null,
+                  author:
+                    c.author_id && people.get(c.author_id)
+                      ? { name: people.get(c.author_id)!.name, side: people.get(c.author_id)!.side, avatar: people.get(c.author_id)!.avatar }
+                      : null,
                 }))}
               />
             </TabsContent>
@@ -365,7 +425,12 @@ export default async function ContentPage({ params, searchParams }: PageProps<"/
                   {source.link_url ? (
                     <DetailRow label="Link">
                       <div className="space-y-1.5">
-                        <a href={source.link_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 break-all text-accent hover:underline">
+                        <a
+                          href={source.link_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 break-all text-accent hover:underline"
+                        >
                           {source.link_url} <ExternalLink className="size-3" aria-hidden />
                         </a>
                         {can.isAgency
@@ -392,7 +457,12 @@ export default async function ContentPage({ params, searchParams }: PageProps<"/
                   ) : null}
                   {item.live_url ? (
                     <DetailRow label="Live post">
-                      <a href={item.live_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 break-all text-accent hover:underline">
+                      <a
+                        href={item.live_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 break-all text-accent hover:underline"
+                      >
                         {item.live_url} <ExternalLink className="size-3" aria-hidden />
                       </a>
                     </DetailRow>
@@ -514,7 +584,11 @@ function ClientDecision({
       );
     }
     return (
-      <StatusCard icon={<Hourglass className="size-5" aria-hidden />} tone="bg-blue-50 text-blue-700" title={responded ? "Your approval is recorded" : "Waiting for approval"}>
+      <StatusCard
+        icon={<Hourglass className="size-5" aria-hidden />}
+        tone="bg-blue-50 text-blue-700"
+        title={responded ? "Your approval is recorded" : "Waiting for approval"}
+      >
         {needsAll ? `${approvedCount} of ${approverCount} approvers have approved. ` : "An approver from your team needs to review this. "}
         <DeadlineText iso={item.approval_deadline} tz={tz} />
       </StatusCard>
@@ -527,7 +601,9 @@ function ClientDecision({
         tone="bg-emerald-50 text-emerald-700"
         title={item.status === "published" ? "Published" : item.status === "scheduled" ? "Approved and scheduled" : "Approved"}
       >
-        {item.status === "published" && item.published_at ? `Went live ${formatDateTime(item.published_at, tz)}.` : `Goes out ${formatDateTime(item.planned_at, tz)}.`}
+        {item.status === "published" && item.published_at
+          ? `Went live ${formatDateTime(item.published_at, tz)}.`
+          : `Goes out ${formatDateTime(item.planned_at, tz)}.`}
       </StatusCard>
     );
   }
@@ -544,7 +620,19 @@ function ClientDecision({
 const STEPS = ["planned", "draft", "internal_review", "client_review", "approved", "scheduled", "published"] as const;
 const STEP_LABELS = ["Planned", "Draft", "Internal review", "With client", "Approved", "Scheduled", "Published"];
 
-function MoveButton({ itemId, to, label, variant = "secondary", size = "sm" }: { itemId: string; to: string; label: string; variant?: "primary" | "secondary" | "ghost" | "success"; size?: "sm" | "md" }) {
+function MoveButton({
+  itemId,
+  to,
+  label,
+  variant = "secondary",
+  size = "sm",
+}: {
+  itemId: string;
+  to: string;
+  label: string;
+  variant?: "primary" | "secondary" | "ghost" | "success";
+  size?: "sm" | "md";
+}) {
   return (
     <ActionForm action={moveContent}>
       <input type="hidden" name="item_id" value={itemId} />
@@ -561,11 +649,85 @@ function PublishForm({ itemId, defaultUrl, label = "Mark as published" }: { item
     <ActionForm action={moveContent} className="flex flex-col gap-2 sm:flex-row">
       <input type="hidden" name="item_id" value={itemId} />
       <input type="hidden" name="to" value="published" />
-      <input name="live_url" type="url" defaultValue={defaultUrl ?? ""} placeholder="Link to the live post (optional)" className="field" aria-label="Live post link" />
+      <input
+        name="live_url"
+        type="url"
+        defaultValue={defaultUrl ?? ""}
+        placeholder="Link to the live post (optional)"
+        className="field"
+        aria-label="Live post link"
+      />
       <SubmitButton variant="success" pendingLabel="Saving…">
         {label}
       </SubmitButton>
     </ActionForm>
+  );
+}
+
+/** The client's reply-by date and the Send to client button. */
+function SendToClientForm({
+  item,
+  tz,
+  planShared,
+  isAdmin,
+  action,
+}: {
+  item: ContentItem;
+  tz: string;
+  planShared: boolean;
+  isAdmin: boolean;
+  action: typeof sendToClient;
+}) {
+  return (
+    <ActionForm action={action} className="space-y-3">
+      <input type="hidden" name="item_id" value={item.id} />
+      {!planShared ? (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
+          {isAdmin
+            ? "Share this month's plan with the client first (from the plan page)."
+            : "An admin needs to share this month's plan with the client before it can be sent."}
+        </p>
+      ) : null}
+      <label className="flex flex-wrap items-center gap-2 text-[13px] text-ink-soft">
+        Client should reply by
+        <input
+          name="deadline"
+          type="datetime-local"
+          defaultValue={isoToZonedInput(defaultApprovalDeadline(item.planned_at), tz)}
+          className="field w-auto py-1.5"
+        />
+        <span className="text-muted">{zoneLabel(tz)} time. The client sees it in PT and LK.</span>
+      </label>
+      <SubmitButton variant="primary" pendingLabel="Sending…">
+        <Send className="size-4" aria-hidden /> Send to client
+      </SubmitButton>
+    </ActionForm>
+  );
+}
+
+/** Upload a new version. While the client is reviewing, it goes to them straight away. */
+function NewVersion({ item, workspaceId, hasMedia }: { item: ContentItem; workspaceId: string; hasMedia: boolean }) {
+  const withClient = item.status === "client_review";
+  return (
+    <Sheet
+      title={withClient ? "Send a new version" : "Upload a new version"}
+      description={
+        withClient
+          ? "The client gets it straight away and is asked to approve again. The previous version is kept in the history."
+          : "The previous version is kept in the history."
+      }
+      triggerLabel={hasMedia ? "New version" : "Upload media"}
+      icon="plus"
+      triggerVariant={hasMedia ? "secondary" : "primary"}
+      triggerSize={withClient ? "sm" : "md"}
+    >
+      <MediaUploader
+        workspaceId={workspaceId}
+        itemId={item.id}
+        hasVersions={hasMedia}
+        submitLabel={withClient ? "Send new version to the client" : undefined}
+      />
+    </Sheet>
   );
 }
 
@@ -581,7 +743,7 @@ function AgencyWorkflow({
   workspaceId,
   publish,
   canPublish,
-  canSendToClient,
+  isAdmin,
   approvedWork,
   publishRequest,
 }: {
@@ -597,8 +759,8 @@ function AgencyWorkflow({
   publish: { targets: string[]; kindLabel: string; manual: string[]; blockedReason: string | null } | null;
   /** Agency admins publish; team members ask them to. */
   canPublish: boolean;
-  /** Agency admins review posts and send them to the client; team members send them for review. */
-  canSendToClient: boolean;
+  /** Agency admins can also send a post in internal review back with fixes. Everyone on the team sends posts to the client. */
+  isAdmin: boolean;
   /** Task work an admin marked done. Its maker sends the post to the client; everyone else sees whether they have. */
   approvedWork: { pending: boolean; mine: boolean; sender: string; reviewer: string; sentAt: string | null } | null;
   publishRequest: { by: string; mine: boolean; at: string } | null;
@@ -610,10 +772,8 @@ function AgencyWorkflow({
   const step = STEPS.indexOf(item.status);
   const next: Record<(typeof STEPS)[number], string> = {
     planned: "Upload the images or video to start the draft.",
-    draft: canSendToClient ? "When it's ready, send it for internal review." : "When it's ready, send it to an admin for review.",
-    internal_review: canSendToClient
-      ? "Check it, then send it to the client, or send it back with fixes."
-      : "Waiting for an admin to check it. They send it to the client.",
+    draft: "When it's ready, send it to the client.",
+    internal_review: isAdmin ? "Check it, then send it to the client, or send it back with fixes." : "Send it to the client when it's ready.",
     client_review: "Waiting for the client to approve.",
     approved: !canPublish
       ? "The client approved it. Ask an admin to publish it."
@@ -638,7 +798,11 @@ function AgencyWorkflow({
             </span>
             <span className="text-muted">{STEP_LABELS[step]}</span>
           </div>
-          <AnimatedBar className="mt-2 h-1.5" label={`Step ${step + 1} of ${STEPS.length}`} segments={[{ value: ((step + 1) / STEPS.length) * 100, className: "bg-accent" }]} />
+          <AnimatedBar
+            className="mt-2 h-1.5"
+            label={`Step ${step + 1} of ${STEPS.length}`}
+            segments={[{ value: ((step + 1) / STEPS.length) * 100, className: "bg-accent" }]}
+          />
         </div>
 
         <div className="space-y-4 p-4 sm:p-5">
@@ -660,13 +824,11 @@ function AgencyWorkflow({
           {item.status === "planned" ? <MediaUploader workspaceId={workspaceId} itemId={item.id} hasVersions={false} /> : null}
 
           {item.status === "draft" ? (
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="space-y-3">
               {hasMedia && !awaitingSend ? (
-                <MoveButton itemId={item.id} to="internal_review" label={canSendToClient ? "Send for internal review" : "Send for review"} variant="primary" size="md" />
+                <SendToClientForm item={item} tz={tz} planShared={planShared} isAdmin={isAdmin} action={sendToClient} />
               ) : null}
-              <Sheet title="Upload a new version" description="The previous version is kept in the history." triggerLabel={hasMedia ? "New version" : "Upload media"} icon="plus" triggerVariant={hasMedia ? "secondary" : "primary"} triggerSize="md">
-                <MediaUploader workspaceId={workspaceId} itemId={item.id} hasVersions={hasMedia} />
-              </Sheet>
+              <NewVersion item={item} workspaceId={workspaceId} hasMedia={hasMedia} />
             </div>
           ) : null}
 
@@ -674,11 +836,18 @@ function AgencyWorkflow({
             <ActionForm action={sendApprovedWork} className="space-y-3">
               <input type="hidden" name="item_id" value={item.id} />
               {!planShared ? (
-                <p className="rounded-lg bg-amber-50 px-3 py-2 text-[13px] text-amber-900">An admin needs to share this month&apos;s plan with the client before it can be sent.</p>
+                <p className="rounded-lg bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
+                  An admin needs to share this month&apos;s plan with the client before it can be sent.
+                </p>
               ) : null}
               <label className="flex flex-wrap items-center gap-2 text-[13px] text-ink-soft">
                 Client should reply by
-                <input name="deadline" type="datetime-local" defaultValue={isoToZonedInput(defaultApprovalDeadline(item.planned_at), tz)} className="field w-auto py-1.5" />
+                <input
+                  name="deadline"
+                  type="datetime-local"
+                  defaultValue={isoToZonedInput(defaultApprovalDeadline(item.planned_at), tz)}
+                  className="field w-auto py-1.5"
+                />
                 <span className="text-muted">{zoneLabel(tz)} time. The client sees it in PT and LK.</span>
               </label>
               <SubmitButton variant="primary" pendingLabel="Sending…">
@@ -695,20 +864,33 @@ function AgencyWorkflow({
             </p>
           ) : null}
 
-          {item.status === "internal_review" && !canSendToClient && !awaitingSend ? (
-            <MoveButton itemId={item.id} to="draft" label="Withdraw to draft" variant="ghost" />
+          {item.status === "internal_review" && !isAdmin && !awaitingSend ? (
+            <div className="space-y-3">
+              <SendToClientForm item={item} tz={tz} planShared={planShared} isAdmin={false} action={sendToClient} />
+              <div className="flex flex-wrap items-center gap-2">
+                <NewVersion item={item} workspaceId={workspaceId} hasMedia={hasMedia} />
+                <MoveButton itemId={item.id} to="draft" label="Withdraw to draft" variant="ghost" />
+              </div>
+            </div>
           ) : null}
 
-          {item.status === "internal_review" && canSendToClient && !awaitingSend ? (
+          {item.status === "internal_review" && isAdmin && !awaitingSend ? (
             <ActionForm action={internalReview} className="space-y-3">
               <input type="hidden" name="item_id" value={item.id} />
               {!planShared ? (
-                <p className="rounded-lg bg-amber-50 px-3 py-2 text-[13px] text-amber-900">Share this month&apos;s plan with the client first (from the plan page).</p>
+                <p className="rounded-lg bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
+                  Share this month&apos;s plan with the client first (from the plan page).
+                </p>
               ) : null}
               <textarea name="note" rows={2} className="field" placeholder="Note for the team (needed if sending back)" aria-label="Review note" />
               <label className="flex flex-wrap items-center gap-2 text-[13px] text-ink-soft">
                 Client should reply by
-                <input name="deadline" type="datetime-local" defaultValue={isoToZonedInput(defaultApprovalDeadline(item.planned_at), tz)} className="field w-auto py-1.5" />
+                <input
+                  name="deadline"
+                  type="datetime-local"
+                  defaultValue={isoToZonedInput(defaultApprovalDeadline(item.planned_at), tz)}
+                  className="field w-auto py-1.5"
+                />
                 <span className="text-muted">{zoneLabel(tz)} time. The client sees it in PT and LK.</span>
               </label>
               <div className="flex flex-wrap gap-2">
@@ -720,6 +902,9 @@ function AgencyWorkflow({
                 </SubmitButton>
               </div>
             </ActionForm>
+          ) : null}
+          {item.status === "internal_review" && isAdmin && !awaitingSend ? (
+            <NewVersion item={item} workspaceId={workspaceId} hasMedia={hasMedia} />
           ) : null}
 
           {item.status === "client_review" ? (
@@ -742,7 +927,10 @@ function AgencyWorkflow({
                   ))}
                 </ul>
               ) : null}
-              <MoveButton itemId={item.id} to="draft" label="Withdraw to draft" variant="ghost" />
+              <div className="flex flex-wrap items-center gap-2">
+                <NewVersion item={item} workspaceId={workspaceId} hasMedia={hasMedia} />
+                <MoveButton itemId={item.id} to="draft" label="Withdraw to draft" variant="ghost" />
+              </div>
             </div>
           ) : null}
 
@@ -768,7 +956,9 @@ function AgencyWorkflow({
                     <Send className="size-4" aria-hidden /> {publishRequest ? "Send a reminder" : "Request publishing"}
                   </SubmitButton>
                 </ActionForm>
-                {item.status === "approved" ? <MoveButton itemId={item.id} to="scheduled" label="Mark as scheduled" variant="secondary" size="md" /> : null}
+                {item.status === "approved" ? (
+                  <MoveButton itemId={item.id} to="scheduled" label="Mark as scheduled" variant="secondary" size="md" />
+                ) : null}
               </div>
               <div className="flex flex-wrap gap-1">
                 {item.status === "scheduled" ? <MoveButton itemId={item.id} to="approved" label="Unschedule" variant="ghost" /> : null}
@@ -810,7 +1000,14 @@ function AgencyWorkflow({
             <div className="space-y-3">
               <ActionForm action={saveLiveUrl} className="flex flex-col gap-2 sm:flex-row">
                 <input type="hidden" name="item_id" value={item.id} />
-                <input name="live_url" type="url" defaultValue={item.live_url ?? ""} placeholder="https://www.instagram.com/p/…" className="field" aria-label="Live post link" />
+                <input
+                  name="live_url"
+                  type="url"
+                  defaultValue={item.live_url ?? ""}
+                  placeholder="https://www.instagram.com/p/…"
+                  className="field"
+                  aria-label="Live post link"
+                />
                 <SubmitButton variant="secondary" pendingLabel="Saving…">
                   Save link
                 </SubmitButton>

@@ -110,6 +110,7 @@ export function Badge({ tone = "gray", children, className }: { tone?: Tone; chi
 }
 
 const avatarSize = {
+  xs: "size-4 text-[7.5px]",
   sm: "size-6 text-[10px]",
   md: "size-8 text-xs",
   lg: "size-12 text-base",

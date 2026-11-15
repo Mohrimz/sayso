@@ -57,8 +57,9 @@ export default async function TeamBoard({ searchParams }: PageProps<"/tasks">) {
   // Approved work: whether it has gone to the client yet.
   const sentStatus = await getSentStatus(supabase, rounds ?? []);
   // The latest round of submitted work for each task.
-  const lastReview = new Map<string, { decision: string | null; note: string | null }>();
-  for (const r of rounds ?? []) if (!lastReview.has(r.task_id)) lastReview.set(r.task_id, { decision: r.decision, note: r.review_note });
+  const lastReview = new Map<string, { decision: string | null; note: string | null; by: string | null }>();
+  for (const r of rounds ?? [])
+    if (!lastReview.has(r.task_id)) lastReview.set(r.task_id, { decision: r.decision, note: r.review_note, by: r.submitted_by });
 
   const view = (t: (typeof tasks)[number]): TaskView => ({
     ...t,

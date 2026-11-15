@@ -62,7 +62,7 @@ export default async function Dashboard() {
   });
   const planIds = plans.map((p) => p.id);
   const { data: monthItems } = planIds.length
-    ? await supabase.from("content_items").select("plan_id, type, status").in("plan_id", planIds)
+    ? await supabase.from("content_items").select("plan_id, type, status").in("plan_id", planIds).is("removed_at", null)
     : { data: [] };
 
   const open = openItemsRes.data ?? [];

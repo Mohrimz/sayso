@@ -178,6 +178,11 @@ export default function PrivacyPage() {
                   which emails you’ve chosen to get.
                 </li>
                 <li>
+                  <strong className="text-ink">Phone notifications:</strong> if you allow notifications in the {APP_NAME} phone app, we store
+                  a notification token for that phone so your alerts can reach it. It’s deleted when you sign out of the app or the token stops
+                  working.
+                </li>
+                <li>
                   <strong className="text-ink">Last active:</strong> a single time showing when you last used {APP_NAME}, updated at most every few
                   minutes while you have it open. We don’t record what you looked at or for how long.
                 </li>
@@ -256,6 +261,10 @@ export default function PrivacyPage() {
                 </li>
                 <li>
                   <strong className="text-ink">Resend:</strong> delivers our emails, from its Tokyo, Japan region.
+                </li>
+                <li>
+                  <strong className="text-ink">Google Firebase Cloud Messaging:</strong> delivers notifications to the {APP_NAME} phone app. It
+                  receives the phone’s notification token and each alert’s title and text.
                 </li>
                 <li>
                   <strong className="text-ink">Anthropic:</strong> powers Sayso, the assistant agency staff can use. When staff ask it a

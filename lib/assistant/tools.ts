@@ -181,7 +181,7 @@ async function dailyBriefing(input: z.infer<typeof DailyBriefing>, data: Assista
 
   const [openRes, publishedRes, tasksRes, approvalsRes, commentsRes, threadsRes, offersRes] = await Promise.all([
     supabase.from("content_items").select(ITEM_COLUMNS).in("workspace_id", ids).neq("status", "published").order("planned_at", { ascending: true }),
-    supabase.from("content_items").select(ITEM_COLUMNS).in("workspace_id", ids).gte("published_at", since),
+    supabase.from("content_items").select(ITEM_COLUMNS).in("workspace_id", ids).gte("published_at", since).is("removed_at", null),
     supabase
       .from("tasks")
       .select("id, workspace_id, title, status, due_date, owner_id, owner_side, internal")
@@ -380,7 +380,7 @@ async function listClients(input: z.infer<typeof ListClients>, data: AssistantDa
     return ws && p.month === `${currentMonth(ws.time_zone)}-01`;
   });
   const planItems = currentPlans.length
-    ? ((await supabase.from("content_items").select("plan_id, type, status").in("plan_id", currentPlans.map((p) => p.id))).data ?? [])
+    ? ((await supabase.from("content_items").select("plan_id, type, status").in("plan_id", currentPlans.map((p) => p.id)).is("removed_at", null)).data ?? [])
     : [];
   const nowIso = new Date().toISOString();
 
@@ -449,6 +449,7 @@ async function findContent(input: z.infer<typeof FindContent>, data: AssistantDa
     .from("content_items")
     .select(ITEM_COLUMNS)
     .in("workspace_id", workspaces.map((w) => w.id))
+    .is("removed_at", null)
     .order("planned_at", { ascending: true, nullsFirst: false })
     .limit(500);
 
@@ -666,7 +667,7 @@ async function recentActivity(input: z.infer<typeof RecentActivity>, data: Assis
     supabase.from("internal_notes").select("content_item_id, author_id, body, decision, created_at, workspace_id").in("workspace_id", ids).gte("created_at", since).order("created_at", recent).limit(100),
     supabase.from("messages").select("workspace_id, channel, author_id, body, attachments, created_at").in("workspace_id", ids).is("deleted_at", null).gte("created_at", since).order("created_at", recent).limit(150),
     supabase.from("progress_updates").select("workspace_id, author_id, body, created_at").in("workspace_id", ids).gte("created_at", since).order("created_at", recent).limit(50),
-    supabase.from("content_items").select("id, title, workspace_id, published_at, live_url").in("workspace_id", ids).gte("published_at", since).limit(100),
+    supabase.from("content_items").select("id, title, workspace_id, published_at, live_url").in("workspace_id", ids).gte("published_at", since).is("removed_at", null).limit(100),
     supabase.from("tasks").select("title, workspace_id, owner_id, owner_side, completed_at").in("workspace_id", ids).gte("completed_at", since).limit(100),
   ]);
 

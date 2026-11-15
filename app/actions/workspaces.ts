@@ -10,7 +10,7 @@ import { deleteLogin } from "@/lib/account";
 import { APP_NAME } from "@/lib/env";
 import { currentMonth } from "@/lib/dates";
 import { devLinksAllowed } from "@/lib/email";
-import { csv, done, fail, friendlyError, isEmail, lines, num, optNum, optStr, str } from "@/lib/action-helpers";
+import { csv, deliverNotificationsLater, done, fail, friendlyError, isEmail, lines, num, optNum, optStr, str } from "@/lib/action-helpers";
 import { slugify } from "@/lib/utils";
 import type { ApprovalRuleEntry, Colour, Faq, Font, MemberRole, SocialAccount } from "@/lib/types";
 import type { ActionState } from "./types";
@@ -226,6 +226,7 @@ export async function updateBrandKit(_: ActionState, fd: FormData): Promise<Acti
     faq,
   });
   if (error) return fail(friendlyError(error));
+  deliverNotificationsLater();
   refresh();
   return done("Brand kit saved.");
 }

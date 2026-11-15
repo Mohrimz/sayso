@@ -1,6 +1,8 @@
 "use server";
 
 import { refresh } from "next/cache";
+import { after } from "next/server";
+import { checkRemovedPostsLater } from "@/lib/post-removal";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findWorkspaceAccess, requireViewer } from "@/lib/auth";
@@ -57,6 +59,8 @@ export async function refreshPostResults(itemId: string, force = false): Promise
     if (cached && age < (force ? RESULTS_MIN_REFRESH_MS : resultsMaxAge(cached.posted_at))) return viewFromRow(cached);
 
     const result = await fetcher();
+    // Instagram can't find it: check soon whether it was deleted there.
+    if (platform === "instagram" && result.status === "not_found") after(() => checkRemovedPostsLater(item!.workspace_id, { minGapMs: 10 * 60 * 1000 }));
     const row =
       result.status === "ok"
         ? { status: "ok", media_id: result.mediaId, permalink: result.permalink, posted_at: result.postedAt, metrics: result.metrics, error: null }

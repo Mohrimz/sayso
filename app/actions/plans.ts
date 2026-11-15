@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { findWorkspaceAccess, requireViewer } from "@/lib/auth";
 import { isMonthParam } from "@/lib/dates";
-import { done, fail, friendlyError, lines, optStr, str } from "@/lib/action-helpers";
+import { deliverNotificationsLater, done, fail, friendlyError, lines, optStr, str } from "@/lib/action-helpers";
 import type { KeyDate, PlanStatus } from "@/lib/types";
 import type { ActionState } from "./types";
 
@@ -74,6 +74,7 @@ export async function setPlanStatus(_: ActionState, fd: FormData): Promise<Actio
   }
   const { error } = await ctx.supabase.from("monthly_plans").update({ status }).eq("id", ctx.plan.id);
   if (error) return fail(friendlyError(error));
+  deliverNotificationsLater();
   refresh();
   return done(status === "active" ? "Shared with the client." : status === "closed" ? "Month closed." : "Hidden from the client.");
 }
@@ -88,6 +89,7 @@ export async function postProgressUpdate(_: ActionState, fd: FormData): Promise<
     .from("progress_updates")
     .insert({ workspace_id: ctx.plan.workspace_id, plan_id: ctx.plan.id, author_id: viewer.id, body });
   if (error) return fail(friendlyError(error));
+  deliverNotificationsLater();
   refresh();
   return done("Update posted.");
 }

@@ -63,10 +63,28 @@ function safeName(name: string) {
 }
 
 /** "Submit work" on an agency task: pick the post it's for, upload the files, add a note. */
-export function SubmitWork({ taskId, workspaceId, title, postId }: { taskId: string; workspaceId: string; title: string; postId: string | null }) {
+export function SubmitWork({
+  taskId,
+  workspaceId,
+  title,
+  postId,
+  resend = false,
+}: {
+  taskId: string;
+  workspaceId: string;
+  title: string;
+  postId: string | null;
+  /** A new version of work that's still waiting for review. It replaces the one waiting. */
+  resend?: boolean;
+}) {
   return (
-    <Sheet title="Submit your work" description={title} triggerLabel="Submit work" triggerVariant="primary">
-      <SubmitWorkForm taskId={taskId} workspaceId={workspaceId} postId={postId} taskTitle={title} />
+    <Sheet
+      title={resend ? "Send a new version" : "Submit your work"}
+      description={resend ? `${title}. It replaces the version waiting for review.` : title}
+      triggerLabel={resend ? "New version" : "Submit work"}
+      triggerVariant={resend ? "secondary" : "primary"}
+    >
+      <SubmitWorkForm taskId={taskId} workspaceId={workspaceId} postId={postId} taskTitle={title} resend={resend} />
     </Sheet>
   );
 }
@@ -96,7 +114,10 @@ function SubmitWorkForm({
   postId,
   taskTitle,
   clients = [],
+  resend = false,
 }: {
+  /** A new version of work already waiting for review. */
+  resend?: boolean;
   /** The task this work is for, or null for work sent without one (it gets its own task). */
   taskId: string | null;
   workspaceId: string;
@@ -448,7 +469,7 @@ function SubmitWorkForm({
           ) : null}
 
           <Button type="button" variant="primary" size="lg" className="w-full" onClick={submit} disabled={busy || !ready}>
-            {busy ? "Sending…" : "Send for review"}
+            {busy ? "Sending…" : resend ? "Send new version" : "Send for review"}
           </Button>
         </>
       )}
@@ -595,7 +616,9 @@ function ReviewPanel({ taskId, readOnly = false }: { taskId: string; readOnly?: 
                   ? `changes requested${round.reviewer ? ` by ${round.reviewer}` : ""}${round.reviewNote ? `: “${round.reviewNote}”` : ""}`
                   : round.decision === "approved"
                     ? "approved"
-                    : "not reviewed"}
+                    : round.decision === "replaced"
+                      ? "replaced by a newer version"
+                      : "not reviewed"}
               </li>
             ))}
           </ul>

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { CalendarClock, ChevronLeft, ChevronRight, EyeOff, Plus } from "lucide-react";
+import { after } from "next/server";
+import { CalendarClock, ChevronLeft, ChevronRight, CircleOff, EyeOff, Plus } from "lucide-react";
 import { getWorkspaceAccess } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { getPeople, getPlanByMonth, getThumbnails } from "@/lib/queries";
@@ -17,11 +18,18 @@ import { ContentRow } from "@/components/content-card";
 import { Timeline } from "@/components/timeline";
 import { RealtimeRefresh } from "@/components/realtime-refresh";
 import { createPlan, deleteProgressUpdate, postProgressUpdate, setPlanStatus, updatePlan } from "@/app/actions/plans";
+import { restorePost } from "@/app/actions/content";
+import { DeletePostButton } from "@/components/delete-post-button";
+import { checkRemovedPostsLater } from "@/lib/post-removal";
+import type { ContentStatus } from "@/lib/types";
+
+/** What a client sees on the calendar: only posts that are set to go out, or already have. */
+const CLIENT_CALENDAR: ContentStatus[] = ["approved", "scheduled", "published"];
 
 export default async function PlanPage({ params, searchParams }: PageProps<"/w/[slug]/plan/[month]">) {
   const [{ slug, month }, sp] = await Promise.all([params, searchParams]);
   if (!isMonthParam(month)) notFound();
-  const { workspace, can } = await getWorkspaceAccess(slug);
+  const { workspace, can, viewer } = await getWorkspaceAccess(slug);
   const supabase = await createClient();
   const tz = workspace.time_zone;
   const base = `/w/${workspace.slug}`;
@@ -32,11 +40,19 @@ export default async function PlanPage({ params, searchParams }: PageProps<"/w/[
   const header = (
     <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
       <div className="flex items-center gap-1">
-        <Link href={`${base}/plan/${shiftMonth(month, -1)}`} className="rounded-lg p-1.5 text-muted transition hover:bg-sunken hover:text-ink" aria-label="Previous month">
+        <Link
+          href={`${base}/plan/${shiftMonth(month, -1)}`}
+          className="rounded-lg p-1.5 text-muted transition hover:bg-sunken hover:text-ink"
+          aria-label="Previous month"
+        >
           <ChevronLeft className="size-5" aria-hidden />
         </Link>
         <h1 className="px-1 text-xl font-semibold tracking-tight whitespace-nowrap sm:text-2xl">{monthLabel(month)}</h1>
-        <Link href={`${base}/plan/${shiftMonth(month, 1)}`} className="rounded-lg p-1.5 text-muted transition hover:bg-sunken hover:text-ink" aria-label="Next month">
+        <Link
+          href={`${base}/plan/${shiftMonth(month, 1)}`}
+          className="rounded-lg p-1.5 text-muted transition hover:bg-sunken hover:text-ink"
+          aria-label="Next month"
+        >
           <ChevronRight className="size-5" aria-hidden />
         </Link>
         {plan && can.isAgency && plan.status === "closed" ? <Badge className="ml-1">Closed</Badge> : null}
@@ -68,7 +84,9 @@ export default async function PlanPage({ params, searchParams }: PageProps<"/w/[
               </ActionForm>
             </CaughtUp>
           ) : (
-            <CaughtUp art="calendar" title="This plan isn't ready yet">Your agency will share it here once it&apos;s ready.</CaughtUp>
+            <CaughtUp art="calendar" title="This plan isn't ready yet">
+              Your agency will share it here once it&apos;s ready.
+            </CaughtUp>
           )}
         </Card>
       </div>
@@ -78,18 +96,34 @@ export default async function PlanPage({ params, searchParams }: PageProps<"/w/[
   const [itemsRes, updatesRes] = await Promise.all([
     supabase
       .from("content_items")
-      .select("id, title, type, status, client_decision, planned_at, approval_deadline")
+      .select("id, title, type, status, client_decision, planned_at, published_at, approval_deadline, removed_at, removed_from, assignee_id")
       .eq("plan_id", plan.id)
       .order("planned_at", { ascending: true, nullsFirst: false }),
     supabase.from("progress_updates").select("*").eq("plan_id", plan.id).order("created_at", { ascending: false }),
   ]);
-  const items = itemsRes.data ?? [];
+  const all = itemsRes.data ?? [];
+  // Posts that are no longer on Instagram leave the plan (the agency sees them listed below).
+  const items = all.filter((i) => !i.removed_at);
+  const removed = can.isAgency ? all.filter((i) => i.removed_at) : [];
+  // Look for posts deleted on Instagram, after the page is sent; the plan updates live if any are found.
+  if (items.some((i) => i.status === "published")) after(() => checkRemovedPostsLater(workspace.id));
+  // The client's calendar only shows what's going out: posts they've approved, scheduled ones and published ones.
+  const onCalendar = can.isAgency ? items : items.filter((i) => CLIENT_CALENDAR.includes(i.status));
   const updates = updatesRes.data ?? [];
-  const [people, thumbs] = await Promise.all([getPeople(updates.map((u) => u.author_id)), getThumbnails(items.map((i) => i.id))]);
+  const [people, thumbs] = await Promise.all([
+    // Assignees are agency-only: clients never get them.
+    getPeople([...updates.map((u) => u.author_id), ...(can.isAgency ? items.map((i) => i.assignee_id) : [])]),
+    getThumbnails(onCalendar.map((i) => i.id)),
+  ]);
   const keyDates = asArray<KeyDate>(plan.key_dates);
   // The month's posts by stage (published ones are counted under Progress).
   const stages = [
-    { key: "ready", title: "Ready", description: "Approved by the client, waiting to go out.", items: items.filter((i) => i.status === "approved" || i.status === "scheduled") },
+    {
+      key: "ready",
+      title: "Ready",
+      description: "Approved by the client, waiting to go out.",
+      items: items.filter((i) => i.status === "approved" || i.status === "scheduled"),
+    },
     {
       key: "approval",
       title: "Needs approval",
@@ -129,7 +163,7 @@ export default async function PlanPage({ params, searchParams }: PageProps<"/w/[
 
       <Tabs
         tabs={[
-          { value: "calendar", label: "Calendar", count: items.length },
+          { value: "calendar", label: "Calendar", count: onCalendar.length },
           { value: "overview", label: "Overview" },
           { value: "updates", label: "Updates", count: updates.length },
         ]}
@@ -137,7 +171,7 @@ export default async function PlanPage({ params, searchParams }: PageProps<"/w/[
         <TabsContent value="calendar">
           <Timeline
             month={month}
-            items={items}
+            items={onCalendar}
             keyDates={keyDates}
             tz={tz}
             side={side}
@@ -145,7 +179,38 @@ export default async function PlanPage({ params, searchParams }: PageProps<"/w/[
             view={view}
             viewHrefs={{ calendar: `${base}/plan/${month}`, list: `${base}/plan/${month}?view=list` }}
             thumbs={thumbs}
+            assign={can.isAgency ? { people, me: viewer.id } : undefined}
+            emptyText={can.isAgency ? undefined : "Nothing scheduled yet. Posts show here once they're approved."}
           />
+          {removed.length ? (
+            <Card className="mt-6 overflow-hidden">
+              <div className="border-b border-line px-4 py-3.5 sm:px-5">
+                <h2 className="flex items-center gap-2 text-[15px] font-semibold">
+                  <CircleOff className="size-4 text-muted" aria-hidden /> Not on Instagram anymore
+                </h2>
+                <p className="mt-0.5 text-[13px] text-muted">Deleted or archived on Instagram, so they&apos;re off the plan. The client doesn&apos;t see this list.</p>
+              </div>
+              <ul className="divide-y divide-line">
+                {removed.map((i) => (
+                  <li key={i.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5">
+                    <Link href={`${base}/content/${i.id}`} className="min-w-0 flex-1 truncate text-sm font-medium text-ink hover:underline">
+                      {i.title}
+                    </Link>
+                    <span className="text-xs text-muted">Gone since {formatDay(i.removed_at!.slice(0, 10))}</span>
+                    <div className="flex gap-1.5">
+                      <ActionForm action={restorePost}>
+                        <input type="hidden" name="item_id" value={i.id} />
+                        <SubmitButton size="sm" variant="secondary" pendingLabel="Restoring…">
+                          Restore
+                        </SubmitButton>
+                      </ActionForm>
+                      {can.manageWorkspace ? <DeletePostButton itemId={i.id} title={i.title} status={i.status} removed /> : null}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          ) : null}
         </TabsContent>
 
         <TabsContent value="overview">
@@ -162,15 +227,21 @@ export default async function PlanPage({ params, searchParams }: PageProps<"/w/[
                     <ActionForm action={updatePlan} className="space-y-4">
                       <input type="hidden" name="plan_id" value={plan.id} />
                       <div>
-                        <label className="label" htmlFor="themes">Themes</label>
+                        <label className="label" htmlFor="themes">
+                          Themes
+                        </label>
                         <textarea id="themes" name="themes" rows={4} defaultValue={plan.themes ?? ""} className="field" />
                       </div>
                       <div>
-                        <label className="label" htmlFor="goals">Goals</label>
+                        <label className="label" htmlFor="goals">
+                          Goals
+                        </label>
                         <textarea id="goals" name="goals" rows={3} defaultValue={plan.goals ?? ""} className="field" />
                       </div>
                       <div>
-                        <label className="label" htmlFor="key_dates">Key dates</label>
+                        <label className="label" htmlFor="key_dates">
+                          Key dates
+                        </label>
                         <textarea
                           id="key_dates"
                           name="key_dates"
@@ -237,9 +308,18 @@ export default async function PlanPage({ params, searchParams }: PageProps<"/w/[
             {can.managePlans ? (
               <ActionForm action={postProgressUpdate} resetOnSuccess className="border-b border-line p-4 sm:p-5">
                 <input type="hidden" name="plan_id" value={plan.id} />
-                <textarea name="body" rows={2} required className="field" placeholder="Share a quick update with the client…" aria-label="Progress update" />
+                <textarea
+                  name="body"
+                  rows={2}
+                  required
+                  className="field"
+                  placeholder="Share a quick update with the client…"
+                  aria-label="Progress update"
+                />
                 <div className="mt-2 flex justify-end">
-                  <SubmitButton size="sm" pendingLabel="Posting…">Post update</SubmitButton>
+                  <SubmitButton size="sm" pendingLabel="Posting…">
+                    Post update
+                  </SubmitButton>
                 </div>
               </ActionForm>
             ) : null}
@@ -259,7 +339,9 @@ export default async function PlanPage({ params, searchParams }: PageProps<"/w/[
                       {can.managePlans ? (
                         <form action={deleteProgressUpdate}>
                           <input type="hidden" name="id" value={u.id} />
-                          <button type="submit" className="text-xs text-faint hover:text-danger">Delete</button>
+                          <button type="submit" className="text-xs text-faint hover:text-danger">
+                            Delete
+                          </button>
                         </form>
                       ) : null}
                     </StaggerItem>

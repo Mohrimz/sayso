@@ -284,6 +284,12 @@ const PREF_FOR_TYPE: Record<string, keyof NotificationPrefs> = {
   message: "email_messages",
   mention: "email_messages",
   offer: "email_offers",
+  task_completed: "email_tasks",
+  plan_shared: "email_approvals",
+  published: "email_approvals",
+  progress_update: "email_comments",
+  brand_kit_updated: "email_changes",
+  post_removed: "email_changes",
 };
 
 const CTA_FOR_TYPE: Record<string, string> = {
@@ -297,6 +303,12 @@ const CTA_FOR_TYPE: Record<string, string> = {
   offer: "See the offer",
   message: "Open the chat",
   mention: "Open the chat",
+  task_completed: "Open the tasks",
+  plan_shared: "See the plan",
+  published: "See the post",
+  progress_update: "Read the update",
+  brand_kit_updated: "Open the brand kit",
+  post_removed: "Open the post",
 };
 
 /**

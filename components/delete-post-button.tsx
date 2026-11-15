@@ -5,7 +5,7 @@ import { AlertDialog } from "radix-ui";
 import { Trash2 } from "lucide-react";
 import { FormMessage, SubmitButton } from "@/components/action-form";
 import { buttonClass } from "@/components/ui";
-import { deleteContentItem } from "@/app/actions/content";
+import { deleteContentItem, deleteRemovedPost } from "@/app/actions/content";
 import type { ContentStatus } from "@/lib/types";
 
 /** What the client loses, by stage. Published posts can't be deleted. */
@@ -15,22 +15,25 @@ function consequence(status: ContentStatus) {
   return "Its files, comments and team notes are deleted with it.";
 }
 
-/** "Delete" on a post (agency team, any stage before Published), with a confirmation step. */
-export function DeletePostButton({ itemId, title, status }: { itemId: string; title: string; status: ContentStatus }) {
+/**
+ * "Delete" on a post (agency team, any stage before Published), with a confirmation step.
+ * `removed`: a published post that's no longer on Instagram, which an admin can delete for good.
+ */
+export function DeletePostButton({ itemId, title, status, removed = false }: { itemId: string; title: string; status: ContentStatus; removed?: boolean }) {
   const [open, setOpen] = useState(false);
-  const [state, formAction, pending] = useActionState(deleteContentItem, null);
+  const [state, formAction, pending] = useActionState(removed ? deleteRemovedPost : deleteContentItem, null);
 
   return (
     <AlertDialog.Root open={open} onOpenChange={(next) => (pending ? undefined : setOpen(next))}>
       <AlertDialog.Trigger className={buttonClass("ghost", "sm")} aria-label="Delete this post">
-        <Trash2 className="size-4" aria-hidden /> Delete
+        <Trash2 className="size-4" aria-hidden /> {removed ? "Delete for good" : "Delete"}
       </AlertDialog.Trigger>
       <AlertDialog.Portal>
         <AlertDialog.Overlay className="fixed inset-0 z-50 bg-ink/50 backdrop-blur-[2px]" />
         <AlertDialog.Content className="animate-pop fixed top-1/2 left-1/2 z-50 w-[min(420px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-line bg-surface p-5 shadow-2xl outline-none">
           <AlertDialog.Title className="text-base font-semibold text-ink">Delete “{title}”?</AlertDialog.Title>
           <AlertDialog.Description className="mt-1 text-sm text-muted">
-            {consequence(status)} This can&apos;t be undone.
+            {removed ? "It's already gone from Instagram. Its files, comments and approvals in Sayso go too." : consequence(status)} This can&apos;t be undone.
           </AlertDialog.Description>
           <form action={formAction} className="mt-4">
             <input type="hidden" name="item_id" value={itemId} />
